@@ -1,0 +1,24 @@
+name: plimsoll
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: postgres
+      PLIMSOLL_OWNER_PASSWORD: ${PLIMSOLL_OWNER_PASSWORD}
+      PLIMSOLL_APP_PASSWORD: ${PLIMSOLL_APP_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d plimsoll"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

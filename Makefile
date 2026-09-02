@@ -12,10 +12,17 @@ endif
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
+# Load .env so `make migrate` and `make test-integration` work without the caller having
+# to source it first. Values are exported to every recipe.
+ifneq (,$(wildcard .env))
+  include .env
+  export
+endif
+
 BACKEND := backend
 COMPOSE := docker compose -f deploy/compose.yaml --env-file .env
 
-.PHONY: help generate migrate migrate-down test test-integration lint docs-check up down psql smoke
+.PHONY: test-integration-v help generate migrate migrate-down test test-integration lint docs-check up down psql smoke
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -53,3 +60,5 @@ psql: ## interactive psql as the app role (to inspect what RLS actually allows)
 
 smoke: ## the M0 exit check, end to end through Caddy
 	bash deploy/smoke.sh
+test-integration-v: ## integration tests, verbose
+	cd $(BACKEND) && go test -tags=integration -count=1 -v ./...
