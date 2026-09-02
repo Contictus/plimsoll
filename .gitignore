@@ -1,0 +1,19 @@
+# secrets — never committed (L13)
+.env
+.env.*
+!.env.example
+*.key
+deploy/secrets/
+
+# go
+backend/bin/
+*.test
+coverage.out
+
+# node (M3)
+node_modules/
+.next/
+
+# editors
+.idea/
+.vscode/

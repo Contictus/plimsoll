@@ -1,0 +1,5 @@
+# LF everywhere. A CRLF Makefile breaks GNU Make's recipe parsing, and a CRLF shell
+# script fails inside a Linux container with a confusing "not found" error.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
