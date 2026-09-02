@@ -9,6 +9,7 @@ import (
 
 	uuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 )
 
 type Account struct {
@@ -42,6 +43,26 @@ type AssetAlias struct {
 	Source         string
 	ExternalSymbol string
 	AssetID        int64
+	Validity       pgtype.Range[pgtype.Timestamptz]
+}
+
+type Instrument struct {
+	ID              int64
+	CanonicalSymbol string
+	Kind            string
+	BaseAssetID     int64
+	QuoteAssetID    int64
+	SettleAssetID   *int64
+	ContractSize    decimal.Decimal
+	CreatedAt       time.Time
+}
+
+type InstrumentAlias struct {
+	ID             int64
+	Exchange       string
+	Market         string
+	ExchangeSymbol string
+	InstrumentID   int64
 	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
