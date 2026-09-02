@@ -1,0 +1,39 @@
+version: "2"
+sql:
+  - engine: postgresql
+    queries: internal/store/queries
+    schema: migrations
+    gen:
+      go:
+        package: store
+        out: internal/store
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        overrides:
+          # L1: NUMERIC never becomes float64. No NUMERIC column exists yet; the mapping is
+          # configured now so that the first money column in M1 cannot land untyped.
+          - db_type: "pg_catalog.numeric"
+            go_type: "github.com/shopspring/decimal.Decimal"
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              package: "uuid"
+              type: "UUID"
+          # Keep driver types out of the domain layer: a handler should see time.Time.
+          # Nullable columns are NOT overridden separately -- emit_pointers_for_null_types
+          # adds the pointer, and specifying it here as well yields **time.Time.
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: "github.com/google/uuid"
+              package: "uuid"
+              type: "UUID"
+              pointer: true
