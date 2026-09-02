@@ -66,6 +66,15 @@ type InstrumentAlias struct {
 	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
+type Integration struct {
+	ID        uuid.UUID
+	AccountID uuid.UUID
+	Exchange  string
+	Label     string
+	Status    string
+	CreatedAt time.Time
+}
+
 type Invite struct {
 	TokenHash  []byte
 	Email      string
@@ -73,6 +82,26 @@ type Invite struct {
 	ConsumedBy *uuid.UUID
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
+}
+
+type LedgerEvent struct {
+	Seq           int64
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	VenueEventID  string
+	VenueSequence int64
+	Source        string
+	EventType     string
+	InstrumentID  *int64
+	StrategyID    *uuid.UUID
+	Side          *string
+	Quantity      decimal.NullDecimal
+	Price         decimal.NullDecimal
+	Fee           decimal.NullDecimal
+	FeeAsset      *string
+	EventTime     time.Time
+	IngestedAt    time.Time
+	Raw           []byte
 }
 
 type Session struct {

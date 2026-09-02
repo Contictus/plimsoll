@@ -37,7 +37,6 @@ linters:
             - "**/internal/valuation/**"
             - "**/internal/pnl/**"
             - "**/internal/risk/**"
-            - "**/internal/ledger/**"
           deny:
             - pkg: "net/http"
               desc: "engines are pure (L4): no network"
@@ -45,6 +44,26 @@ linters:
               desc: "engines are pure (L4): no logger"
             - pkg: "github.com/jackc/pgx/v5"
               desc: "engines are pure (L4): no database"
+
+        # The ledger is the one module that both owns writes and is named by L4. It gets a
+        # rule of its own rather than an exception to the engines rule: production code may
+        # hold a transaction-scoped *store.Queries handed to it by tenancy.InTx, but never
+        # a pool, a clock, a logger or the driver itself. Its integration tests are
+        # excluded, because the laws they prove -- append-only privileges, the composite FK
+        # -- live in Postgres and cannot be reached from Go without pgx.
+        ledger-holds-a-transaction-not-a-driver:
+          files:
+            - "**/internal/ledger/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: "net/http"
+              desc: "the ledger does not reach the network (L4)"
+            - pkg: "log/slog"
+              desc: "the ledger does not log (L4)"
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: "take a *store.Queries from tenancy.InTx, not the driver"
+            - pkg: "github.com/jackc/pgx/v5/pgxpool"
+              desc: "the ledger must not hold a pool; tenancy.InTx owns the transaction"
 
 # gofmt runs as a formatter so `make lint` reports drift instead of leaving it to a
 # reviewer's eye. It also catches CRLF, which sneaks in from Windows editors and shows up

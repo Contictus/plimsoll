@@ -15,6 +15,13 @@ sql:
           # configured now so that the first money column in M1 cannot land untyped.
           - db_type: "pg_catalog.numeric"
             go_type: "github.com/shopspring/decimal.Decimal"
+          # A nullable money column needs its own mapping: emit_pointers_for_null_types
+          # does not apply to a custom struct type, so without this line every nullable
+          # NUMERIC falls through to the driver's pgtype.Numeric and a driver type ends up
+          # in the domain layer.
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type: "github.com/shopspring/decimal.NullDecimal"
           - db_type: "uuid"
             go_type:
               import: "github.com/google/uuid"
