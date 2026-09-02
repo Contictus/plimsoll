@@ -11,8 +11,15 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Beginner is the slice of a connection pool this package needs. Taking an interface
+// rather than *pgxpool.Pool means a caller -- an HTTP handler, a service -- never has to
+// import pgxpool, which is what lets the depguard rule forbid a pool in a domain package
+// without also forbidding tenancy itself.
+type Beginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
 
 // ErrNoAccount is returned when a transaction is requested for the nil account. Binding
 // an empty setting would make every policy match nothing, which reads as "this account
@@ -25,11 +32,11 @@ var ErrNoAccount = errors.New("tenancy: refusing to open a transaction for the n
 // than another account's rows.
 func InTx(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	db Beginner,
 	accountID uuid.UUID,
 	fn func(*store.Queries) error,
 ) error {
-	return InTxRaw(ctx, pool, accountID, func(tx pgx.Tx) error {
+	return InTxRaw(ctx, db, accountID, func(tx pgx.Tx) error {
 		return fn(store.New(tx))
 	})
 }
@@ -39,14 +46,14 @@ func InTx(
 // the RLS backstop holds on its own.
 func InTxRaw(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	db Beginner,
 	accountID uuid.UUID,
 	fn func(pgx.Tx) error,
 ) error {
 	if accountID == uuid.Nil {
 		return ErrNoAccount
 	}
-	tx, err := pool.Begin(ctx)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("tenancy: begin: %w", err)
 	}

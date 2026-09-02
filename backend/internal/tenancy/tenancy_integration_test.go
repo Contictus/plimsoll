@@ -63,7 +63,7 @@ func seedAccounts(t *testing.T) (a, b uuid.UUID) {
 		email := id.String() + "@example.test"
 		require.NoError(t, asAccount(ctx, owner, id, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx,
-				`INSERT INTO accounts (id, email, password_hash) VALUES ($1, $2, 'x')`,
+				`INSERT INTO accounts (id, email) VALUES ($1, $2)`,
 				id, email)
 			return err
 		}))

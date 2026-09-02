@@ -11,12 +11,18 @@ import (
 )
 
 type Account struct {
-	ID           uuid.UUID
+	ID         uuid.UUID
+	Email      string
+	IsAdmin    bool
+	CreatedAt  time.Time
+	DisabledAt *time.Time
+}
+
+type AccountCredential struct {
 	Email        string
+	AccountID    uuid.UUID
 	PasswordHash string
-	IsAdmin      bool
-	CreatedAt    time.Time
-	DisabledAt   *time.Time
+	UpdatedAt    time.Time
 }
 
 type Invite struct {

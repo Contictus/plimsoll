@@ -7,7 +7,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	uuid "github.com/google/uuid"
 )
@@ -18,19 +17,11 @@ FROM accounts
 WHERE id = $1
 `
 
-type GetAccountByIDRow struct {
-	ID         uuid.UUID
-	Email      string
-	IsAdmin    bool
-	CreatedAt  time.Time
-	DisabledAt *time.Time
-}
-
 // Scoped by id as the primary defence (L12); the RLS policy on accounts is the backstop
 // underneath it. Always called through tenancy.InTx.
-func (q *Queries) GetAccountByID(ctx context.Context, id uuid.UUID) (GetAccountByIDRow, error) {
+func (q *Queries) GetAccountByID(ctx context.Context, id uuid.UUID) (Account, error) {
 	row := q.db.QueryRow(ctx, getAccountByID, id)
-	var i GetAccountByIDRow
+	var i Account
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
