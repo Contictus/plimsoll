@@ -46,6 +46,13 @@ linters:
             - pkg: "github.com/jackc/pgx/v5"
               desc: "engines are pure (L4): no database"
 
+# gofmt runs as a formatter so `make lint` reports drift instead of leaving it to a
+# reviewer's eye. It also catches CRLF, which sneaks in from Windows editors and shows up
+# as a whole-file diff in git.
+formatters:
+  enable:
+    - gofmt
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
