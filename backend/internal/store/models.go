@@ -8,6 +8,7 @@ import (
 	"time"
 
 	uuid "github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Account struct {
@@ -23,6 +24,25 @@ type AccountCredential struct {
 	AccountID    uuid.UUID
 	PasswordHash string
 	UpdatedAt    time.Time
+}
+
+type Asset struct {
+	ID                int64
+	CanonicalSymbol   string
+	Kind              string
+	Chain             *string
+	ContractAddress   *string
+	IsWrapped         bool
+	UnderlyingAssetID *int64
+	CreatedAt         time.Time
+}
+
+type AssetAlias struct {
+	ID             int64
+	Source         string
+	ExternalSymbol string
+	AssetID        int64
+	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
 type Invite struct {
