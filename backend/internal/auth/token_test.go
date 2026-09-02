@@ -74,7 +74,10 @@ func TestSecretRedactsInLogs(t *testing.T) {
 	require.Equal(t, "REDACTED", s.LogValue().String())
 	require.Equal(t, "REDACTED", s.String())
 
-	var v slog.Value = s.LogValue()
+	// Compile-time proof that slog will route through LogValue rather than formatting the
+	// underlying string.
+	var _ slog.LogValuer = s
+	v := s.LogValue()
 	require.NotContains(t, v.String(), "super-secret")
 	require.Equal(t, "super-secret-api-key", s.Reveal())
 }

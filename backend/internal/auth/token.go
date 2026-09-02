@@ -94,8 +94,12 @@ func HashToken(plaintext string) []byte {
 // into a message by accident (L13).
 type Secret string
 
+// LogValue is what slog calls instead of formatting the value, so a Secret passed as a
+// log attribute is redacted at the handler rather than at the call site.
 func (s Secret) LogValue() slog.Value { return slog.StringValue("REDACTED") }
-func (s Secret) String() string       { return "REDACTED" }
+
+// String keeps the value redacted when it is interpolated into a message by accident.
+func (s Secret) String() string { return "REDACTED" }
 
 // Reveal returns the underlying value. Every call site is a place a secret can escape, so
 // keep them few and obvious.
