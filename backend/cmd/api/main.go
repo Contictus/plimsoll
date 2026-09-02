@@ -17,10 +17,13 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
+	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/Contictus/plimsoll/backend/internal/store"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
+	serviceName       = "plimsoll-api"
 	defaultAddr       = ":8000"
 	sessionTTL        = 24 * time.Hour
 	readHeaderTimeout = 10 * time.Second
@@ -29,7 +32,7 @@ const (
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := obs.NewLogger(os.Stdout, slog.LevelInfo)
 	if err := run(log); err != nil {
 		log.Error("api exited", "error", err)
 		os.Exit(1)
@@ -48,6 +51,22 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// Tracing is installed before the pool so that a slow or failing first connection is
+	// itself visible in a trace. With no collector configured this is a no-op.
+	shutdownTracing, err := obs.SetupTracing(ctx, serviceName)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// A fresh context: ctx is cancelled by the time this runs, and the exporter needs
+		// a live one to flush the last batch.
+		flushCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		if err := shutdownTracing(flushCtx); err != nil {
+			log.Error("flushing traces", "error", err)
+		}
+	}()
+
 	dsn := os.Getenv("PLIMSOLL_APP_DSN")
 	if dsn == "" {
 		return errors.New("PLIMSOLL_APP_DSN is not set")
@@ -62,13 +81,17 @@ func run(log *slog.Logger) error {
 	if addr == "" {
 		addr = defaultAddr
 	}
+	router := httpapi.NewRouter(httpapi.Deps{
+		DB:   pool,
+		Auth: auth.NewService(store.New(pool), pool, sessionTTL),
+		Now:  time.Now,
+	})
+
 	srv := &http.Server{
 		Addr: addr,
-		Handler: httpapi.NewRouter(httpapi.Deps{
-			DB:   pool,
-			Auth: auth.NewService(store.New(pool), pool, sessionTTL),
-			Now:  time.Now,
-		}),
+		// otelhttp wraps the whole router, so every request gets a span whether or not
+		// its handler remembers to start one.
+		Handler: otelhttp.NewHandler(router, serviceName),
 		// Without this a client can hold a connection open indefinitely by dribbling
 		// headers; it is the one timeout with no safe default.
 		ReadHeaderTimeout: readHeaderTimeout,
