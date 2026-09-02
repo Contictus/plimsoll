@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - bodyclose
+    - noctx
+
+  settings:
+    depguard:
+      rules:
+        # Domain packages must reach the database through tenancy.InTx, never by taking a
+        # connection from the pool themselves (K15, L12). Enforced by a lint rule rather
+        # than by convention, because a convention is what gets forgotten at 2am.
+        no-direct-pool-in-domain:
+          files:
+            - "**/internal/auth/**"
+            - "**/internal/httpapi/**"
+            - "**/internal/position/**"
+            - "**/internal/valuation/**"
+            - "**/internal/pnl/**"
+            - "**/internal/risk/**"
+          deny:
+            - pkg: "github.com/jackc/pgx/v5/pgxpool"
+              desc: "use tenancy.InTx; a domain package must not hold a pool"
+
+        # Engines are pure functions: no clock, no logger, no network (L4). Time and
+        # prices are inputs, which is what makes scenario shocks and historical
+        # reconstruction cheap.
+        no-io-in-engines:
+          files:
+            - "**/internal/position/**"
+            - "**/internal/valuation/**"
+            - "**/internal/pnl/**"
+            - "**/internal/risk/**"
+            - "**/internal/ledger/**"
+          deny:
+            - pkg: "net/http"
+              desc: "engines are pure (L4): no network"
+            - pkg: "log/slog"
+              desc: "engines are pure (L4): no logger"
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: "engines are pure (L4): no database"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
