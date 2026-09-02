@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
+	"github.com/Contictus/plimsoll/backend/internal/config"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
 	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -28,10 +28,19 @@ const (
 	sessionTTL        = 24 * time.Hour
 	readHeaderTimeout = 10 * time.Second
 	shutdownGrace     = 15 * time.Second
-	masterKEKBytes    = 32
 )
 
 func main() {
+	// `plimsoll healthcheck` probes the running server and exits. It is how compose
+	// health-checks a distroless image, which has no shell and no curl to do it with.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := probeHealth(healthProbeURL(os.Getenv("PLIMSOLL_HTTP_ADDR"))); err != nil {
+			fmt.Fprintln(os.Stderr, "plimsoll:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	log := obs.NewLogger(os.Stdout, slog.LevelInfo)
 	if err := run(log); err != nil {
 		log.Error("api exited", "error", err)
@@ -45,9 +54,7 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := checkMasterKEK(os.Getenv("PLIMSOLL_MASTER_KEK")); err != nil {
-		// Fail at startup rather than at the first credential decrypt in M2. A process
-		// that boots and then cannot read any integration is far harder to diagnose.
+	if err := config.CheckMasterKEK(os.Getenv("PLIMSOLL_MASTER_KEK")); err != nil {
 		return err
 	}
 
@@ -122,24 +129,4 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-serveErr
-}
-
-// checkMasterKEK validates the envelope-encryption master key without ever holding it in
-// a package-level variable or logging it (K25, L13). M0 only proves it is present and
-// well-formed; the key itself is used from M2.
-func checkMasterKEK(encoded string) error {
-	if encoded == "" {
-		return errors.New("PLIMSOLL_MASTER_KEK is not set")
-	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		// The decode error would not carry key material, but the value is a secret and
-		// nothing derived from it belongs in an error string.
-		return errors.New("PLIMSOLL_MASTER_KEK is not valid base64")
-	}
-	if len(raw) != masterKEKBytes {
-		return fmt.Errorf("PLIMSOLL_MASTER_KEK must decode to %d bytes, got %d",
-			masterKEKBytes, len(raw))
-	}
-	return nil
 }

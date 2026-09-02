@@ -3,6 +3,7 @@ package obs_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/stretchr/testify/require"
@@ -29,4 +30,22 @@ func TestTracingShutdownIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, shutdown(context.Background()))
 	require.NoError(t, shutdown(context.Background()))
+}
+
+// The no-endpoint path returns before any of the SDK is touched, so on its own it proves
+// nothing about the exporter, the resource, or the provider. This exercises the real one.
+// It caught a schema-URL conflict between resource.Default() and a pinned semconv version
+// that only appeared at container startup.
+//
+// No collector is needed: the gRPC exporter dials lazily, so construction and shutdown
+// both complete against an address with nothing behind it.
+func TestSetupTracingBuildsARealProvider(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:14317")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	shutdown, err := obs.SetupTracing(ctx, "plimsoll-test")
+	require.NoError(t, err)
+	require.NoError(t, shutdown(ctx))
 }

@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 // SetupTracing installs the global tracer provider and returns its shutdown function,
@@ -34,10 +34,16 @@ func SetupTracing(ctx context.Context, serviceName string) (func(context.Context
 		return nil, fmt.Errorf("obs: otlp exporter: %w", err)
 	}
 
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceName(serviceName),
-	))
+	// Built from detectors rather than merged onto resource.Default(). Merging is what
+	// produced "conflicting Schema URL" at container startup: the SDK's default resource
+	// carries whatever semconv version it was built against, and pinning a different one
+	// here breaks on the next SDK upgrade. WithAttributes carries no schema of its own, so
+	// it composes with any of them.
+	res, err := resource.New(ctx,
+		resource.WithFromEnv(),      // OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES
+		resource.WithTelemetrySDK(), // sdk name, language and version
+		resource.WithAttributes(semconv.ServiceName(serviceName)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("obs: trace resource: %w", err)
 	}

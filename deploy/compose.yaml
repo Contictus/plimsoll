@@ -1,5 +1,15 @@
 name: plimsoll
 
+# The only host ports published are the ones a human uses: caddy (the single origin),
+# jaeger's UI, and postgres for migrations and the integration suite. The api and the
+# worker are reachable only on the compose network, so K27's same-origin claim is a fact
+# about the topology rather than a convention (deploy/smoke.sh checks it).
+
+x-backend-env: &backend-env
+  PLIMSOLL_APP_DSN: postgres://plimsoll_app:${PLIMSOLL_APP_PASSWORD}@postgres:5432/plimsoll?sslmode=disable
+  PLIMSOLL_MASTER_KEK: ${PLIMSOLL_MASTER_KEK}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -19,6 +29,64 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:16686/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: ../backend
+      args:
+        CMD: api
+    environment:
+      <<: *backend-env
+      OTEL_SERVICE_NAME: plimsoll-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      # The distroless image has no shell and no curl, so the binary probes itself. Only
+      # 200 counts, and /healthz answers 503 when Postgres is unreachable -- the container
+      # goes unhealthy with its database, which is the behaviour an operator needs.
+      test: ["CMD", "/plimsoll", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  worker:
+    build:
+      context: ../backend
+      args:
+        CMD: worker
+    environment:
+      <<: *backend-env
+      OTEL_SERVICE_NAME: plimsoll-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "${CADDY_HOST_PORT:-8080}:8080"
+    depends_on:
+      - api
 
 volumes:
   pgdata:

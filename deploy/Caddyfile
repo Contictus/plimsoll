@@ -1,0 +1,17 @@
+# K27: one origin for the UI and the API. There is no CORS configuration anywhere in this
+# project because there is no cross-origin request to configure, and the session cookie is
+# never reachable from JavaScript.
+#
+# handle_path strips the /api prefix, so the API's own routes stay clean: the router
+# registers /healthz and /me, and the outside world reaches them at /api/healthz and
+# /api/me. Path rewriting lives here rather than in Go so the process is identical whether
+# it runs behind Caddy or bare in a test.
+:8080 {
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		respond "plimsoll: the dashboard arrives in M3" 200
+	}
+}
