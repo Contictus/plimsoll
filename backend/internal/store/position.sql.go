@@ -13,6 +13,39 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const countLedgerEventsThrough = `-- name: CountLedgerEventsThrough :one
+SELECT count(*) FROM ledger_events
+WHERE account_id = $1
+  AND integration_id = $2
+  AND (event_time, venue_sequence, venue_event_id) <=
+      ($3::timestamptz,
+       $4::bigint,
+       $5::text)
+`
+
+type CountLedgerEventsThroughParams struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	EventTime     time.Time
+	VenueSequence int64
+	VenueEventID  string
+}
+
+// How many events sit at or below a cursor, in canonical order. Compared against what the
+// projector folded, this detects an event that arrived behind the cursor (issue #4).
+func (q *Queries) CountLedgerEventsThrough(ctx context.Context, arg CountLedgerEventsThroughParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLedgerEventsThrough,
+		arg.AccountID,
+		arg.IntegrationID,
+		arg.EventTime,
+		arg.VenueSequence,
+		arg.VenueEventID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deletePositionFees = `-- name: DeletePositionFees :exec
 DELETE FROM position_fees
 WHERE account_id = $1
@@ -64,7 +97,7 @@ func (q *Queries) DropProjectionCursor(ctx context.Context, arg DropProjectionCu
 }
 
 const getProjectionCursor = `-- name: GetProjectionCursor :one
-SELECT last_event_time, last_venue_sequence, last_venue_event_id
+SELECT last_event_time, last_venue_sequence, last_venue_event_id, projected_count
 FROM projection_cursors
 WHERE account_id = $1 AND integration_id = $2
 `
@@ -78,12 +111,18 @@ type GetProjectionCursorRow struct {
 	LastEventTime     time.Time
 	LastVenueSequence int64
 	LastVenueEventID  string
+	ProjectedCount    int64
 }
 
 func (q *Queries) GetProjectionCursor(ctx context.Context, arg GetProjectionCursorParams) (GetProjectionCursorRow, error) {
 	row := q.db.QueryRow(ctx, getProjectionCursor, arg.AccountID, arg.IntegrationID)
 	var i GetProjectionCursorRow
-	err := row.Scan(&i.LastEventTime, &i.LastVenueSequence, &i.LastVenueEventID)
+	err := row.Scan(
+		&i.LastEventTime,
+		&i.LastVenueSequence,
+		&i.LastVenueEventID,
+		&i.ProjectedCount,
+	)
 	return i, err
 }
 
@@ -270,15 +309,18 @@ func (q *Queries) UpsertPosition(ctx context.Context, arg UpsertPositionParams) 
 
 const upsertProjectionCursor = `-- name: UpsertProjectionCursor :exec
 INSERT INTO projection_cursors (
-  account_id, integration_id, last_event_time, last_venue_sequence, last_venue_event_id
+  account_id, integration_id, last_event_time, last_venue_sequence, last_venue_event_id,
+  projected_count
 ) VALUES (
   $1, $2,
-  $3, $4, $5
+  $3, $4, $5,
+  $6
 )
 ON CONFLICT (integration_id) DO UPDATE SET
   last_event_time     = EXCLUDED.last_event_time,
   last_venue_sequence = EXCLUDED.last_venue_sequence,
   last_venue_event_id = EXCLUDED.last_venue_event_id,
+  projected_count     = EXCLUDED.projected_count,
   updated_at          = now()
 `
 
@@ -288,6 +330,7 @@ type UpsertProjectionCursorParams struct {
 	LastEventTime     time.Time
 	LastVenueSequence int64
 	LastVenueEventID  string
+	ProjectedCount    int64
 }
 
 func (q *Queries) UpsertProjectionCursor(ctx context.Context, arg UpsertProjectionCursorParams) error {
@@ -297,6 +340,7 @@ func (q *Queries) UpsertProjectionCursor(ctx context.Context, arg UpsertProjecti
 		arg.LastEventTime,
 		arg.LastVenueSequence,
 		arg.LastVenueEventID,
+		arg.ProjectedCount,
 	)
 	return err
 }

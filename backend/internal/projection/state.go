@@ -12,25 +12,26 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// loadCursor returns where the last run stopped. A missing row is the zero cursor, which
+// loadCursor returns where the last run stopped, and how many events it folded to get
+// there -- the pair that lets the next run notice something arrived behind it. A missing row is the zero cursor, which
 // sits before every event, so a first run and a rebuild take the same path.
 func loadCursor(
 	ctx context.Context, q *store.Queries, accountID, integrationID uuid.UUID,
-) (ledger.Cursor, error) {
+) (ledger.Cursor, int64, error) {
 	row, err := q.GetProjectionCursor(ctx, store.GetProjectionCursorParams{
 		AccountID: accountID, IntegrationID: integrationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ledger.Cursor{}, nil
+		return ledger.Cursor{}, 0, nil
 	}
 	if err != nil {
-		return ledger.Cursor{}, fmt.Errorf("projection: read cursor for %s: %w", integrationID, err)
+		return ledger.Cursor{}, 0, fmt.Errorf("projection: read cursor for %s: %w", integrationID, err)
 	}
 	return ledger.Cursor{
 		EventTime:     row.LastEventTime,
 		VenueSequence: row.LastVenueSequence,
 		VenueEventID:  row.LastVenueEventID,
-	}, nil
+	}, row.ProjectedCount, nil
 }
 
 // loadStates reads the whole projection for one integration back into engine states. It
