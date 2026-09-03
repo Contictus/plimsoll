@@ -1,0 +1,19 @@
+{
+  "_source": "derived",
+  "_why": "Binance adds fields. A new non-boolean one carries no capability, so it must not trip the unknown-permission rejection -- otherwise every key stops verifying the day the vendor adds a timestamp.",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "tradingAuthorityExpirationTime": 1698806400000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": false,
+  "apiAgentCode": "none"
+}

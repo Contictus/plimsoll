@@ -1,0 +1,17 @@
+{
+  "_source": "documented",
+  "_why": "The key we accept: reading only, everything else off. Field list and the shape of each value are the response example at https://developers.binance.com/docs/wallet/account/api-key-permission, verified 2026-09-03.",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": false
+}
