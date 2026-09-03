@@ -112,6 +112,27 @@ func (q *Queries) InsertPositionFee(ctx context.Context, arg InsertPositionFeePa
 	return err
 }
 
+const integrationExists = `-- name: IntegrationExists :one
+SELECT EXISTS (
+  SELECT 1 FROM integrations
+  WHERE account_id = $1 AND id = $2
+)
+`
+
+type IntegrationExistsParams struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+}
+
+// The projector names an integration; RLS makes another account's return zero rows rather
+// than an error, so without this the fold succeeds having silently done nothing.
+func (q *Queries) IntegrationExists(ctx context.Context, arg IntegrationExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, integrationExists, arg.AccountID, arg.IntegrationID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listPositionFees = `-- name: ListPositionFees :many
 SELECT instrument_id, fee_asset, amount
 FROM position_fees

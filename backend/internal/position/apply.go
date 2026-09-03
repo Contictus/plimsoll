@@ -142,7 +142,12 @@ func realized(s State, closed, price decimal.Decimal) decimal.Decimal {
 	if s.Quantity.Sign() < 0 {
 		move = move.Neg()
 	}
-	return closed.Mul(move)
+	// Rounded to the stored scale, and this is load-bearing rather than tidy. The entry
+	// price already carries 18 decimals, so multiplying it by a fractional quantity yields
+	// up to 36 -- and NUMERIC(38,18) rounds those away on write. A fold that reloaded a
+	// stored value and a rebuild that never stored one would then accumulate different
+	// numbers, and the projection would stop being rebuildable (L3).
+	return closed.Mul(move).Round(moneyScale)
 }
 
 // fillTerms validates the event as a fill and returns its signed quantity and its price.
