@@ -1,0 +1,171 @@
+# Binance API — verified notes
+
+**Verified against the official documentation on 2026-09-03.** Every figure below was read
+from `developers.binance.com`, not from memory and not from a blog post. `CLAUDE.md` §2
+requires this because getting these details wrong produces plausible, wrong numbers.
+
+Re-verify before M2 lands: Binance changes endpoint versions and weights without notice,
+and two of the facts below already contradict what the ecosystem still documents widely.
+
+| Source | URL |
+|---|---|
+| Spot REST | https://developers.binance.com/docs/binance-spot-api-docs/rest-api |
+| Spot user data | https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream |
+| Spot WS API user data | https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/user-data-stream-requests |
+| Spot limits | https://developers.binance.com/docs/binance-spot-api-docs/rest-api/limits |
+| USD-M user data | https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams |
+| USD-M trades | https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List |
+| USD-M income | https://developers.binance.com/docs/derivatives/usds-margined-futures/account/rest-api/Get-Income-History |
+| USD-M position risk | https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Position-Information-V3 |
+| Wallet deposits | https://developers.binance.com/docs/wallet/capital/deposite-history |
+| API key permission | https://developers.binance.com/docs/wallet/account/api-key-permission |
+
+---
+
+## 1. The three findings that change M2
+
+### F1 — Spot `listenKey` is gone
+
+Following the 2025-04-07 announcement, listenKey documentation for
+`wss://stream.binance.com` was **removed**. Spot user data now arrives by subscribing on
+the **WebSocket API**:
+
+- `userDataStream.subscribe` — requires an authenticated connection established with
+  `session.logon`, and **that requires Ed25519 keys**
+- `userDataStream.subscribe.signature` — the per-request signature variant, usable with a
+  normal HMAC key
+- 2 IP weight per subscribe request
+- `session.subscriptions` lists what is active; `userDataStream.unsubscribe` ends one
+
+**Consequence for K25:** the credential model has to hold an Ed25519 private key, not only
+an HMAC secret, if we want the authenticated path. The signature variant avoids that and
+is the smaller change. This is a decision M2's plan has to take explicitly.
+
+**USD-M futures still uses listenKey**, so the two markets do not share a realtime path:
+
+| | Spot | USD-M |
+|---|---|---|
+| Mechanism | WS API `userDataStream.subscribe` | `listenKey` |
+| Start | — | `POST /fapi/v1/listenKey` (weight 1) |
+| Keepalive | — | `PUT /fapi/v1/listenKey` (weight 1) |
+| Close | `userDataStream.unsubscribe` | `DELETE /fapi/v1/listenKey` (weight 1) |
+| Expiry | not documented on the page read | 60 minutes without a keepalive |
+
+The docs suggest pinging "about every 60 minutes", which is the expiry itself — ping well
+inside it. Every listenKey call needs the `X-MBX-APIKEY` header.
+
+### F2 — Futures history stops at three months
+
+Both `/fapi/v1/userTrades` and `/fapi/v1/income` state it plainly:
+
+> "Only support querying trade in the past 3 months."
+> "Income history only contains data for the last three months."
+
+**The ledger therefore cannot be complete for USD-M before that date, ever, from these
+endpoints.** This is not a bug to fix; it is a fact to report. L11 says degraded and
+visible beats confident and wrong, and the M0 reason-code set has nothing for it —
+`backfill_incomplete` says "not finished yet", which is a different and recoverable claim.
+M2 needs a distinct reason, e.g. `history_truncated`, meaning "the venue will not give us
+this and never will".
+
+### F3 — `tranId` is unique per `incomeType`, not globally
+
+> "tranId is unique in the same incomeType for a user."
+
+So an income event's identity **must** carry the type:
+`usdm:income:FUNDING_FEE:98765432`. This is exactly the shape `ARCHITECTURE.md` §3 already
+documents — now confirmed from the source rather than assumed. Dropping `incomeType` from
+the key would collide a funding fee with a commission and silently deduplicate one away
+(L5, K19).
+
+---
+
+## 2. Endpoints M2 needs
+
+| Endpoint | Weight | Limit | Time window | History depth |
+|---|---|---|---|---|
+| `GET /api/v3/myTrades` | **20** (5 with `orderId`) | max 1000, default 500 | **≤ 24 hours** | not stated |
+| `GET /api/v3/account` | 20 | — | — | — |
+| `GET /fapi/v1/userTrades` | 5 | max 1000, default 500 | **≤ 7 days** | **3 months** |
+| `GET /fapi/v1/income` | **30** | max 1000, default 100 | default 7 days | **3 months** |
+| `GET /fapi/v3/positionRisk` | 5 | — | — | — |
+| `GET /sapi/v1/capital/deposit/hisrec` | 1 | max 1000, default 1000 | **≤ 90 days** | — |
+| `GET /sapi/v1/capital/withdraw/history` | 1 | max 1000 | **≤ 90 days** | — |
+| `POST/PUT/DELETE /fapi/v1/listenKey` | 1 | — | — | — |
+
+Pagination differs by endpoint and the differences matter:
+
+- **`myTrades`** — `fromId` returns trades with id ≥ that value. Without it, the most
+  recent are returned.
+- **`userTrades`** — `fromId` **cannot be sent together with** `startTime`/`endTime`. So a
+  chunked historical walk and an id-based walk are two different strategies, not one with
+  an optional parameter.
+- **`income`** — `page`/`limit`, not `fromId`. Offset pagination over a moving window is
+  the one that can skip or repeat rows if the window shifts underneath it; the chunk
+  boundaries have to be pinned by time, not by page.
+- **deposits/withdrawals** — `offset`/`limit`.
+
+`positionRisk` is **V3** (`/fapi/v3/positionRisk`), not the V2 most examples still show.
+K6 reads the exchange's liquidation price from here rather than computing it, so the
+version and its field names are load-bearing.
+
+## 3. Rate limits
+
+Exact header names, quoted from the docs:
+
+```
+X-MBX-USED-WEIGHT-(intervalNum)(intervalLetter)
+X-MBX-ORDER-COUNT-(intervalNum)(intervalLetter)
+Retry-After
+```
+
+Interval letters are `S` / `M` / `H` / `D`. So the header to read on a normal request is
+`X-MBX-USED-WEIGHT-1M`.
+
+- **429** — a rate limit was broken; `Retry-After` says how long to wait.
+- **418** — the IP was auto-banned for continuing to send after 429s. Bans scale from
+  **2 minutes to 3 days** for repeat offenders.
+
+> "Limits are based on the IPs, not the API keys."
+
+**This confirms K24.** Two integrations belonging to two different accounts, running from
+one server, share one budget. A per-key limiter alone would let one account's backfill get
+another account's IP banned for three days — which is why K24 is two-tier: per-integration
+weight accounting plus a shared per-IP gate.
+
+The per-minute weight ceiling is **not hardcoded**: `/api/v3/exchangeInfo` returns a
+`rateLimits` array with `RAW_REQUESTS`, `REQUEST_WEIGHT` and `ORDERS`. Read it at connect
+time. A hardcoded number is a number that will be wrong after Binance changes it and we
+will not notice until the ban.
+
+## 4. Read-only key verification (K9, L13)
+
+`GET /sapi/v1/account/apiRestrictions` returns, among others:
+
+```
+ipRestrict, createTime, enableReading, enableWithdrawals,
+enableSpotAndMarginTrading, enableFutures
+```
+
+The rule stays what K9 says: an over-permissioned key is **rejected**, not accepted with a
+warning. `enableWithdrawals` or any trading permission set means refuse the connection and
+tell the user which permission to remove. Note that reading futures data requires
+`enableFutures`, which is a read permission here and not a trading one — verify that
+distinction against the response before writing the check.
+
+## 5. What is still unverified
+
+Recorded so the M2 plan does not quietly assume them:
+
+- The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.
+- Whether spot trade history has a depth limit comparable to the futures three months.
+- The complete `incomeType` enum. Eight were listed on the page read
+  (`TRANSFER`, `WELCOME_BONUS`, `REALIZED_PNL`, `FUNDING_FEE`, `COMMISSION`,
+  `INSURANCE_CLEAR`, `REFERRAL_KICKBACK`, `COMMISSION_REBATE`) and "14 additional types"
+  were not enumerated. The normalizer must reject an unknown type loudly rather than map
+  it to something plausible.
+- USD-M user data event payloads (`ACCOUNT_UPDATE`, `ORDER_TRADE_UPDATE`) and the futures
+  websocket base URL.
+- Whether the spot WS API subscription expires, and what keeps it alive.
+- SBE versus JSON. SBE is offered; JSON is the one whose payload we can store verbatim in
+  `raw` and read six months later (L15), which is an argument on its own.
