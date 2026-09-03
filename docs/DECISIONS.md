@@ -336,6 +336,51 @@ degrades latency; it never loses data. Anything durable is in Postgres.
 Reviewed for removal — Postgres `LISTEN/NOTIFY` could cover the fan-out — and kept,
 because two genuine jobs justify the component. If it ever drops to one, remove it.
 
+### K29 — `integrations` lands with the ledger, not with credentials · `active`
+`ledger_events` carries the composite foreign key
+`(account_id, integration_id) REFERENCES integrations (account_id, id)`, which is what
+makes attaching an event to another account's integration impossible at the storage layer
+rather than merely unlikely. That FK cannot be added to a populated ledger without
+rebuilding it — the exact rebuild M0 existed to make unnecessary — so the table ships in
+M1 with identity and tenancy only. The credential columns arrive in M2 with envelope
+encryption (K25).
+
+**Cost:** a table that holds nothing useful for one milestone. Cheaper than the
+alternative by a wide margin.
+
+### K30 — The strategy tag does not live on `positions` · `supersedes a line in PROJECT.md §2`
+`positions` is a projection: droppable, and rebuilt from events (L3). The strategy
+assignment is **user input**. A tag stored on the projection is erased by every rebuild —
+and the rebuild-equality test would still pass, because both sides would be equally empty.
+It lives in `position_strategies`, keyed the same way and never touched by `Rebuild`.
+
+**The general rule:** anything a human typed cannot be stored on a table that is derived.
+This applies again to manual transfer confirmations (K12) and to acknowledged
+reconciliation findings.
+
+### K31 — M1's fixtures are canonical events, not exchange payloads · `active`
+The golden files in `testdata/golden/` hold normalized events plus the arithmetic worked
+out by hand. Normalization is the exchange module's job in M2, and recorded Binance
+payloads live in `testdata/fixtures/binance/`. Mixing them would make a golden failure
+ambiguous about which layer broke.
+
+**Why the arithmetic is written in the file:** a golden file that records only what the
+code produced proves the code is deterministic and nothing about whether it is right —
+which matters here because the same author writes the engine and its tests.
+
+### K32 — The ledger writes and the fold live outside the pure engines · `qualifies L4`
+L4 names `ledger` and `position` as pure functions with no database handle, while the
+repository layout gives `ledger` the append-only writes. Both cannot be true. The
+resolution:
+
+- `ledger` holds a **transaction-scoped** `*store.Queries` handed to it by `tenancy.InTx`
+  — never a pool, a driver, a clock or a logger. A depguard rule of its own states this.
+- `position` stays literally pure. The projector that folds the ledger into it lives in
+  `internal/projection`, which may reach Postgres only through `tenancy.InTx`.
+
+**Why not simply relax L4:** the law's value is that it is checkable. Written down as
+"engines are mostly pure", it stops catching anything.
+
 ---
 
 ## Deliberately Out of Scope

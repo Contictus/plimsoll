@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K28). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K32). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |

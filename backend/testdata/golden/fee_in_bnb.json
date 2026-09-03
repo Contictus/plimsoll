@@ -1,0 +1,45 @@
+{
+  "name": "fee_in_bnb",
+  "why": "Commission paid in BNB against a USDT-denominated position, closed to exactly zero. The fee must not reach the entry price (L9, K18) and must not be netted off realized PnL either, because converting BNB to USDT needs a price the engine does not have and must not invent.",
+  "arithmetic": [
+    "buy 1 @ 100, fee 0.000375 BNB -> qty 1, avg 100  (avg is 100, not 100.000375)",
+    "buy 1 @ 300, fee 0.00025 BNB  -> qty 2, avg (100 + 300) / 2 = 200",
+    "sell 2 @ 250, fee 0.5 USDT    -> realized (250 - 200) * 2 = 100",
+    "                                 qty 0, avg back to 0: flat means flat, or the next",
+    "                                 position reopens with a cost basis nobody paid",
+    "fees kept per asset, unconverted:",
+    "  BNB  0.000375 + 0.00025 = 0.000625",
+    "  USDT 0.5",
+    "realized_pnl is 100 and not 99.5: the USDT fee is a real cost, but netting it here",
+    "would make one number mean two things. Valuation prices the fees in M4."
+  ],
+  "events": [
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:1", "venue_sequence": 1,
+      "event_time": "2026-03-01T12:00:01Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "1", "price": "100",
+      "fee": "0.000375", "fee_asset": "BNB"
+    },
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:2", "venue_sequence": 2,
+      "event_time": "2026-03-01T12:00:02Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "1", "price": "300",
+      "fee": "0.00025", "fee_asset": "BNB"
+    },
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:3", "venue_sequence": 3,
+      "event_time": "2026-03-01T12:00:03Z", "event_type": "TRADE",
+      "side": "sell", "quantity": "2", "price": "250",
+      "fee": "0.5", "fee_asset": "USDT"
+    }
+  ],
+  "expected": {
+    "quantity": "0",
+    "avg_entry_price": "0",
+    "realized_pnl": "100",
+    "fees": [
+      { "asset": "BNB",  "amount": "0.000625" },
+      { "asset": "USDT", "amount": "0.5" }
+    ]
+  }
+}

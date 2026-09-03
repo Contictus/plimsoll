@@ -1,0 +1,35 @@
+{
+  "name": "spot_basic",
+  "why": "Average cost with an unequal second buy, then a partial close. The arithmetic a reviewer is most likely to do in their head and get wrong.",
+  "arithmetic": [
+    "buy 2 @ 100          -> qty 2,  avg 100",
+    "buy 1 @ 130          -> qty 3,  avg (2*100 + 1*130) / 3 = 330 / 3 = 110",
+    "                        NOT (100 + 130) / 2 = 115, which only agrees when the sizes do",
+    "sell 1 @ 150         -> realized (150 - 110) * 1 = 40",
+    "                        qty 2, avg stays 110: closing part of a position does not",
+    "                        restate the cost basis of what is still open (K5)"
+  ],
+  "events": [
+    {
+      "venue_event_id": "spot:trade:BTCUSDT:1", "venue_sequence": 1,
+      "event_time": "2026-03-01T12:00:01Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "2", "price": "100"
+    },
+    {
+      "venue_event_id": "spot:trade:BTCUSDT:2", "venue_sequence": 2,
+      "event_time": "2026-03-01T12:00:02Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "1", "price": "130"
+    },
+    {
+      "venue_event_id": "spot:trade:BTCUSDT:3", "venue_sequence": 3,
+      "event_time": "2026-03-01T12:00:03Z", "event_type": "TRADE",
+      "side": "sell", "quantity": "1", "price": "150"
+    }
+  ],
+  "expected": {
+    "quantity": "2",
+    "avg_entry_price": "110",
+    "realized_pnl": "40",
+    "fees": []
+  }
+}

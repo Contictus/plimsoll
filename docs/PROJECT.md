@@ -17,7 +17,7 @@ down to its events.
 
 | Document | Contains |
 |---|---|
-| `DECISIONS.md` | K1–K28: every architectural decision, its rationale and its cost |
+| `DECISIONS.md` | K1–K32: every architectural decision, its rationale and its cost |
 | `ARCHITECTURE.md` | Module boundaries, data flow, tenancy mechanics, worker model, schema deltas |
 | `COMPETITIVE-ANALYSIS.md` | Market segmentation, the gap, competitor failure modes |
 | `../CLAUDE.md` = `../AGENTS.md` | Agent operating manual: invariants, workflow, definition of done |
@@ -149,11 +149,25 @@ ledger_events (
 CREATE INDEX ON ledger_events (integration_id, event_time, venue_sequence);
 
 positions (                       -- projection: droppable and rebuildable (L3)
-  account_id, integration_id, instrument_id, strategy_id,
+  account_id, integration_id, instrument_id,
   quantity, avg_entry_price, realized_pnl,
-  last_venue_sequence,            -- per-integration cursor (K20)
+  last_event_time, last_venue_sequence, last_venue_event_id,   -- the whole order (L7)
   updated_at,
   PRIMARY KEY (integration_id, instrument_id)
+);
+-- The cursor is all three columns, not last_venue_sequence alone: two events can share a
+-- sequence, and a sequence-only cursor rejects the second one and loses it for good.
+
+position_fees (                   -- per asset and unconverted (K18, L9)
+  account_id, integration_id, instrument_id, fee_asset, amount
+);
+
+projection_cursors (              -- how far the fold got, per integration (K20, L6)
+  account_id, integration_id, last_event_time, last_venue_sequence, last_venue_event_id
+);
+
+position_strategies (             -- K30: user input, so NOT on the projection above
+  account_id, integration_id, instrument_id, strategy_id, assigned_at
 );
 
 position_snapshots  (account_id, integration_id, as_of, venue_sequence, state JSONB);
@@ -327,8 +341,8 @@ Directories are created when the module is written, not in advance.
 
 | # | Deliverable | Exit criteria |
 |---|---|---|
-| **M0** | Skeleton + tenancy foundation | `compose up` → `/healthz`; goose migrate; sqlc generate; OTel trace visible; two DB roles; `tenancy.InTx` wrapper; accounts/sessions/invites; **tenant isolation test green with the application-level `WHERE` deliberately removed** |
-| **M1** | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
+| **M0** ✅ | Skeleton + tenancy foundation | `compose up` → `/healthz`; goose migrate; sqlc generate; OTel trace visible; two DB roles; `tenancy.InTx` wrapper; accounts/sessions/invites; **tenant isolation test green with the application-level `WHERE` deliberately removed** |
+| **M1** ✅ | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
 | **M2** | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption |
 | **M3** | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
@@ -338,6 +352,11 @@ Directories are created when the module is written, not in advance.
 | **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
 | **M7.5** | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock |
 | **M8** | Bybit + cross-venue transfers | Two sources normalized correctly into one portfolio; withdrawals match deposits |
+
+**Shipped.** M0 and M1 are complete; the exit criteria above are covered by the test
+suite (`make test`, `make test-integration`), and every invariant guard has been
+mutation-tested — deliberately broken to confirm the test that guards it fails. M1 raised
+four contradictions the documents could not all satisfy; they are resolved as K29–K32.
 
 **M0 comes first because tenancy cannot be retrofitted.** Adding `account_id` and RLS to
 a schema that already holds a real ledger means rebuilding every table.

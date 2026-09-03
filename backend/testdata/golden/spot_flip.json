@@ -1,0 +1,36 @@
+{
+  "name": "spot_flip",
+  "why": "A sell larger than the position, then a partial close of the short it opened. Realizing on the whole fill instead of the closed quantity is the classic error, and it inflates PnL on a position that never existed.",
+  "arithmetic": [
+    "buy 1 @ 100          -> qty 1,   avg 100",
+    "sell 4 @ 150         -> closed 1 (the whole long), realized (150 - 100) * 1 = 50",
+    "                        NOT (150 - 100) * 4 = 200",
+    "                        remaining 3 open SHORT at the trade price -> qty -3, avg 150",
+    "buy 1 @ 120          -> closing 1 of the short: a short earns when price falls,",
+    "                        realized (150 - 120) * 1 = 30, running total 80",
+    "                        qty -2, avg stays 150"
+  ],
+  "events": [
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:1", "venue_sequence": 1,
+      "event_time": "2026-03-01T12:00:01Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "1", "price": "100"
+    },
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:2", "venue_sequence": 2,
+      "event_time": "2026-03-01T12:00:02Z", "event_type": "TRADE",
+      "side": "sell", "quantity": "4", "price": "150"
+    },
+    {
+      "venue_event_id": "usdm:trade:BTCUSDT:3", "venue_sequence": 3,
+      "event_time": "2026-03-01T12:00:03Z", "event_type": "TRADE",
+      "side": "buy", "quantity": "1", "price": "120"
+    }
+  ],
+  "expected": {
+    "quantity": "-2",
+    "avg_entry_price": "150",
+    "realized_pnl": "80",
+    "fees": []
+  }
+}
