@@ -357,3 +357,52 @@ func TestStreamPagesForwardWithoutSkippingOrRepeating(t *testing.T) {
 		"spot:deposit:p1", "spot:deposit:p2", "spot:deposit:p3", "spot:deposit:p4",
 	}, seen)
 }
+
+// Review finding 4: POSITION_ADJUSTMENT was storable and unfoldable at the same time. The
+// projector errors on it, that error rolls the whole transaction back, and because the
+// ledger is append-only the event is there forever -- so every later event for that
+// integration becomes unprojectable too, including through Rebuild. One row bricks the
+// integration permanently.
+//
+// The schema must not accept what the engine cannot fold. The type comes back to the
+// CHECK when it has a rule, and until then this fails loudly at write time, where it is
+// one rejected insert instead of a dead projection.
+func TestAnEventTypeWithNoFoldRuleCannotBeStored(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	adjustment := deposit(accountID, integrationID, "usdm:adl:1", 1, at(0))
+	adjustment.EventType = ledger.TypePositionAdjustment
+
+	_, err := appendAs(t, accountID, adjustment)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ledger_events_event_type_check")
+}
+
+// Review finding 3: the projector skips any event with no instrument_id, which silently
+// dropped a standalone FEE and a funding payment -- their cost simply left the numbers,
+// with no error and nothing in freshness (L11). There is no account-level projection for
+// them to land on yet, so the honest answer is to refuse them at write time rather than
+// accept money we then lose.
+func TestAValueCarryingEventMustNameItsInstrument(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	for _, eventType := range []ledger.EventType{
+		ledger.TypeFee, ledger.TypeCommissionRebate, ledger.TypeFundingPayment,
+	} {
+		t.Run(string(eventType), func(t *testing.T) {
+			e := deposit(accountID, integrationID, "usdm:income:"+string(eventType)+":1", 1, at(0))
+			e.EventType = eventType
+			e.Fee = decimal.NewNullDecimal(decimal.RequireFromString("0.5"))
+			e.FeeAsset = "USDT"
+
+			_, err := appendAs(t, accountID, e)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "value_events_name_their_instrument")
+		})
+	}
+
+	// A balance event genuinely has no instrument, and must still be storable.
+	_, err := appendAs(t, accountID,
+		deposit(accountID, integrationID, "spot:deposit:balance", 2, at(time.Second)))
+	require.NoError(t, err)
+}

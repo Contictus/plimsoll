@@ -89,6 +89,9 @@ func foldByType(s State, e ledger.Event) (State, error) {
 		return s, nil
 
 	default:
+		// Defence in depth: since 00009 the schema refuses to store a type with no fold
+		// rule, because one such row rolls back every projection transaction after it and
+		// the ledger is append-only -- the integration is then bricked permanently.
 		return s, fmt.Errorf("%w: %s (%s)", ErrUnsupportedEventType, e.EventType, e.VenueEventID)
 	}
 }
