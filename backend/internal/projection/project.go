@@ -112,7 +112,20 @@ func fold(ctx context.Context, q *store.Queries, accountID, integrationID uuid.U
 			advanced = true
 
 			if e.InstrumentID == nil {
-				continue
+				// A balance event genuinely has no instrument and changes no position, so
+				// it advances the cursor and nothing else. Anything that carries value is
+				// refused at write time by value_events_name_their_instrument (00009), so
+				// this branch cannot reach one -- and if the schema ever relaxes without
+				// this being revisited, the error says so instead of the money quietly
+				// leaving the numbers.
+				switch e.EventType {
+				case ledger.TypeDeposit, ledger.TypeWithdrawal, ledger.TypeTransfer:
+					continue
+				default:
+					return fmt.Errorf(
+						"projection: %s event %s carries value but names no instrument",
+						e.EventType, e.VenueEventID)
+				}
 			}
 			next, err := position.Apply(states[*e.InstrumentID], e)
 			if err != nil {
