@@ -140,6 +140,7 @@ type ProjectionCursor struct {
 	LastVenueSequence int64
 	LastVenueEventID  string
 	UpdatedAt         time.Time
+	ProjectedCount    int64
 }
 
 type Session struct {

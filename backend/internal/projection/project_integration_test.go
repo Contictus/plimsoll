@@ -131,8 +131,8 @@ func appendEvents(t *testing.T, accountID uuid.UUID, events ...ledger.Event) {
 
 func project(t *testing.T, accountID, integrationID uuid.UUID) {
 	t.Helper()
-	require.NoError(t,
-		projection.Project(context.Background(), appPool(t), accountID, integrationID))
+	_, err := projection.Project(context.Background(), appPool(t), accountID, integrationID)
+	require.NoError(t, err)
 }
 
 // projectedRow is every column of the projection that carries meaning. updated_at is
@@ -385,8 +385,8 @@ func TestProjectingAnIntegrationThatIsNotYoursIsAnError(t *testing.T) {
 	accountA, _ := seedIntegration(t)
 	_, integrationB := seedIntegration(t)
 
-	require.ErrorIs(t, projection.Project(ctx, appPool(t), accountA, integrationB),
-		projection.ErrUnknownIntegration)
+	_, err := projection.Project(ctx, appPool(t), accountA, integrationB)
+	require.ErrorIs(t, err, projection.ErrUnknownIntegration)
 	require.ErrorIs(t, projection.Rebuild(ctx, appPool(t), accountA, uuid.New()),
 		projection.ErrUnknownIntegration)
 }
@@ -426,4 +426,61 @@ func TestProjectionTablesCascadeRatherThanBlockDeletion(t *testing.T) {
 			integrationID).Scan(&remaining)
 	}))
 	require.Zero(t, remaining, "position_fees must cascade from positions")
+}
+
+// Issue #4, and M2's exact topology: the WS stream ingests live trades and the projector
+// advances its cursor to today, then the REST backfill appends last year's history. Every
+// backfilled row sorts below the cursor, Stream never returns it, and the position stays
+// permanently wrong with nothing in freshness to say so.
+//
+// The order-independence test does not catch this because it appends everything before
+// projecting once. This one interleaves them the way the two ingest paths will.
+func TestAnEventArrivingBelowTheCursorForcesARebuild(t *testing.T) {
+	ctx := context.Background()
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+
+	// The live stream gets there first.
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "1", "200", 10), accountID, integrationID, instrumentID))
+
+	res, err := projection.Project(ctx, appPool(t), accountID, integrationID)
+	require.NoError(t, err)
+	require.False(t, res.Rebuilt, "a first projection has nothing to rebuild")
+	require.Equal(t, "200", snapshot(t, accountID, integrationID)[0].AvgEntryPrice.String())
+
+	// The backfill then delivers an older trade, which sorts below the cursor.
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "1", "100", 1), accountID, integrationID, instrumentID))
+
+	res, err = projection.Project(ctx, appPool(t), accountID, integrationID)
+	require.NoError(t, err)
+	require.True(t, res.Rebuilt, "an event behind the cursor must force a rebuild")
+
+	rows := snapshot(t, accountID, integrationID)
+	require.Len(t, rows, 1)
+	require.Equal(t, "2", rows[0].Quantity.String())
+	require.Equal(t, "150", rows[0].AvgEntryPrice.String(),
+		"the backfilled trade must reach the position, not be skipped forever")
+}
+
+// The detector must not fire on the ordinary path, or every run becomes a full rebuild and
+// the incremental fold is decorative.
+func TestAnOrdinaryIncrementalRunDoesNotRebuild(t *testing.T) {
+	ctx := context.Background()
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "1", "100", 1), accountID, integrationID, instrumentID))
+	_, err := projection.Project(ctx, appPool(t), accountID, integrationID)
+	require.NoError(t, err)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "1", "200", 2), accountID, integrationID, instrumentID))
+	res, err := projection.Project(ctx, appPool(t), accountID, integrationID)
+	require.NoError(t, err)
+	require.False(t, res.Rebuilt, "an event after the cursor is folded forward, not rebuilt")
+	require.Equal(t, 1, res.EventsFolded)
+	require.Equal(t, "150", snapshot(t, accountID, integrationID)[0].AvgEntryPrice.String())
 }

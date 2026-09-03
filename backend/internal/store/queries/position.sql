@@ -41,21 +41,24 @@ VALUES (sqlc.arg(account_id), sqlc.arg(integration_id), sqlc.arg(instrument_id),
         sqlc.arg(fee_asset), sqlc.arg(amount));
 
 -- name: GetProjectionCursor :one
-SELECT last_event_time, last_venue_sequence, last_venue_event_id
+SELECT last_event_time, last_venue_sequence, last_venue_event_id, projected_count
 FROM projection_cursors
 WHERE account_id = sqlc.arg(account_id) AND integration_id = sqlc.arg(integration_id);
 
 -- name: UpsertProjectionCursor :exec
 INSERT INTO projection_cursors (
-  account_id, integration_id, last_event_time, last_venue_sequence, last_venue_event_id
+  account_id, integration_id, last_event_time, last_venue_sequence, last_venue_event_id,
+  projected_count
 ) VALUES (
   sqlc.arg(account_id), sqlc.arg(integration_id),
-  sqlc.arg(last_event_time), sqlc.arg(last_venue_sequence), sqlc.arg(last_venue_event_id)
+  sqlc.arg(last_event_time), sqlc.arg(last_venue_sequence), sqlc.arg(last_venue_event_id),
+  sqlc.arg(projected_count)
 )
 ON CONFLICT (integration_id) DO UPDATE SET
   last_event_time     = EXCLUDED.last_event_time,
   last_venue_sequence = EXCLUDED.last_venue_sequence,
   last_venue_event_id = EXCLUDED.last_venue_event_id,
+  projected_count     = EXCLUDED.projected_count,
   updated_at          = now();
 
 -- name: DropProjection :exec
@@ -75,3 +78,14 @@ SELECT EXISTS (
   SELECT 1 FROM integrations
   WHERE account_id = sqlc.arg(account_id) AND id = sqlc.arg(integration_id)
 );
+
+-- name: CountLedgerEventsThrough :one
+-- How many events sit at or below a cursor, in canonical order. Compared against what the
+-- projector folded, this detects an event that arrived behind the cursor (issue #4).
+SELECT count(*) FROM ledger_events
+WHERE account_id = sqlc.arg(account_id)
+  AND integration_id = sqlc.arg(integration_id)
+  AND (event_time, venue_sequence, venue_event_id) <=
+      (sqlc.arg(event_time)::timestamptz,
+       sqlc.arg(venue_sequence)::bigint,
+       sqlc.arg(venue_event_id)::text);
