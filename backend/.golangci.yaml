@@ -21,6 +21,7 @@ linters:
             - "**/internal/auth/**"
             - "**/internal/httpapi/**"
             - "**/internal/position/**"
+            - "**/internal/projection/**"
             - "**/internal/valuation/**"
             - "**/internal/pnl/**"
             - "**/internal/risk/**"

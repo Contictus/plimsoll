@@ -104,6 +104,44 @@ type LedgerEvent struct {
 	Raw           []byte
 }
 
+type Position struct {
+	AccountID         uuid.UUID
+	IntegrationID     uuid.UUID
+	InstrumentID      int64
+	Quantity          decimal.Decimal
+	AvgEntryPrice     decimal.Decimal
+	RealizedPnl       decimal.Decimal
+	LastEventTime     time.Time
+	LastVenueSequence int64
+	LastVenueEventID  string
+	UpdatedAt         time.Time
+}
+
+type PositionFee struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	InstrumentID  int64
+	FeeAsset      string
+	Amount        decimal.Decimal
+}
+
+type PositionStrategy struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	InstrumentID  int64
+	StrategyID    uuid.UUID
+	AssignedAt    time.Time
+}
+
+type ProjectionCursor struct {
+	AccountID         uuid.UUID
+	IntegrationID     uuid.UUID
+	LastEventTime     time.Time
+	LastVenueSequence int64
+	LastVenueEventID  string
+	UpdatedAt         time.Time
+}
+
 type Session struct {
 	TokenHash  []byte
 	AccountID  uuid.UUID
