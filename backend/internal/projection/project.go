@@ -8,6 +8,7 @@ package projection
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
@@ -21,6 +22,27 @@ import (
 // bounded by the instrument count, which is small; the event stream is not.
 const pageSize = 500
 
+// ErrUnknownIntegration means the integration named does not belong to this account. RLS
+// would otherwise turn that into an empty result, and both Project and Rebuild would
+// report success having done nothing -- Rebuild having also "dropped" a projection it
+// could not see. Silence is the worst possible failure (L11).
+var ErrUnknownIntegration = errors.New("projection: no such integration for this account")
+
+// requireIntegration is called before any read or write, in the same transaction, so the
+// answer cannot go stale between the check and the work.
+func requireIntegration(ctx context.Context, q *store.Queries, accountID, integrationID uuid.UUID) error {
+	ok, err := q.IntegrationExists(ctx, store.IntegrationExistsParams{
+		AccountID: accountID, IntegrationID: integrationID,
+	})
+	if err != nil {
+		return fmt.Errorf("projection: check integration %s: %w", integrationID, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownIntegration, integrationID)
+	}
+	return nil
+}
+
 // Project folds every event appended since the last run into the position tables. It is
 // idempotent: a second call finds its cursor where it left it and does no work.
 //
@@ -29,6 +51,9 @@ const pageSize = 500
 // long transaction, and when M2 makes that real this is where the batching goes.
 func Project(ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID) error {
 	return tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
+		if err := requireIntegration(ctx, q, accountID, integrationID); err != nil {
+			return err
+		}
 		return fold(ctx, q, accountID, integrationID)
 	})
 }
@@ -42,6 +67,9 @@ func Project(ctx context.Context, db tenancy.Beginner, accountID, integrationID 
 // untouched: the strategy tag is user input, not a fold output (D2).
 func Rebuild(ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID) error {
 	return tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
+		if err := requireIntegration(ctx, q, accountID, integrationID); err != nil {
+			return err
+		}
 		if err := q.DropProjection(ctx, store.DropProjectionParams{
 			AccountID: accountID, IntegrationID: integrationID,
 		}); err != nil {

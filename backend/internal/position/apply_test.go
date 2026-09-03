@@ -290,3 +290,39 @@ func TestApplyDoesNotMutateTheStateItWasGiven(t *testing.T) {
 	requireState(t, base, "1", "100", "0")
 	require.Equal(t, "0.1", base.Fees[0].Amount.String(), "the caller's fees were mutated")
 }
+
+// L3 depends on the fold being reproducible after a round trip through
+// NUMERIC(38,18). A realized-PnL term can carry more than 18 decimals -- the entry price
+// already has exactly 18, and multiplying by a fractional quantity doubles that -- so
+// without rounding, an incremental fold that reloaded a stored value and a rebuild that
+// never stored anything accumulate different numbers and the projection cannot be rebuilt.
+//
+// This case uses a price that does not divide evenly, which is why the whole-number
+// fixtures elsewhere in this file never caught it.
+func TestRealizedPnLSurvivesARoundTripThroughTheStoredScale(t *testing.T) {
+	buys := []ledger.Event{
+		trade(ledger.SideBuy, "1", "100", 1),
+		trade(ledger.SideBuy, "2", "200", 2),
+	}
+	firstSell := trade(ledger.SideSell, "0.5", "200", 3)
+	secondSell := trade(ledger.SideSell, "0.5", "200", 4)
+
+	require.Equal(t, "166.666666666666666667",
+		fold(t, buys...).AvgEntryPrice.String(), "the entry price is already at full scale")
+
+	// One continuous fold: what Rebuild does.
+	rebuilt := fold(t, append(append([]ledger.Event{}, buys...), firstSell, secondSell)...)
+
+	// The same fold interrupted by a store and a reload: what Project does. Postgres
+	// rounds to scale 18 on write, so the reloaded state carries the rounded value.
+	stored := fold(t, append(append([]ledger.Event{}, buys...), firstSell)...)
+	stored.Quantity = stored.Quantity.Round(18)
+	stored.AvgEntryPrice = stored.AvgEntryPrice.Round(18)
+	stored.RealizedPnL = stored.RealizedPnL.Round(18)
+
+	incremental, err := position.Apply(stored, secondSell)
+	require.NoError(t, err)
+
+	require.Equal(t, rebuilt.RealizedPnL.String(), incremental.RealizedPnL.String(),
+		"an incremental fold and a rebuild produced different realized PnL")
+}

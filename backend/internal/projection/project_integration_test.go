@@ -341,3 +341,89 @@ func TestAStrategyAssignmentSurvivesARebuild(t *testing.T) {
 	}))
 	require.Equal(t, strategyID, got, "the rebuild erased a tag the user set by hand")
 }
+
+// Review finding 5: the canonical order is compared in two places -- Go's byte-wise `>`
+// inside the engine's cursor, and the database's collation in the ORDER BY, the keyset
+// comparison and the index. Those two agree only while the column collates like C.
+//
+// The database is declared en_US.utf8. On the musl-based image this behaves like C, so
+// today they happen to agree; on a glibc Postgres -- the standard Debian image, or any
+// managed instance -- en_US.UTF-8 ignores punctuation at the primary level, and
+// venue_event_id is full of colons. The orders would diverge, the fold would be handed
+// two tied-timestamp events in an order Apply rejects, and the projection would stop.
+// Declaring the collation removes the dependency on where this is deployed.
+func TestOrderingColumnsCollateLikeGo(t *testing.T) {
+	ctx := context.Background()
+	pool := ownerPool(t)
+
+	for _, c := range []struct{ table, column string }{
+		{"ledger_events", "venue_event_id"},
+		{"positions", "last_venue_event_id"},
+		{"projection_cursors", "last_venue_event_id"},
+		{"position_fees", "fee_asset"},
+	} {
+		var collation *string
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT c.collname
+			   FROM pg_attribute a
+			   JOIN pg_class t ON t.oid = a.attrelid
+			   LEFT JOIN pg_collation c ON c.oid = a.attcollation
+			  WHERE t.relname = $1 AND a.attname = $2 AND a.attnum > 0`,
+			c.table, c.column).Scan(&collation))
+		require.NotNil(t, collation, "%s.%s has no explicit collation", c.table, c.column)
+		require.Equal(t, "C", *collation,
+			"%s.%s must collate like Go's byte comparison", c.table, c.column)
+	}
+}
+
+// Review finding 6: naming an integration that does not belong to this account must be an
+// error. RLS makes it return zero rows, so without a check the fold reports success having
+// done nothing -- and Rebuild reports success having "dropped" a projection it could not
+// see. Silence is the worst possible failure (L11).
+func TestProjectingAnIntegrationThatIsNotYoursIsAnError(t *testing.T) {
+	ctx := context.Background()
+	accountA, _ := seedIntegration(t)
+	_, integrationB := seedIntegration(t)
+
+	require.ErrorIs(t, projection.Project(ctx, appPool(t), accountA, integrationB),
+		projection.ErrUnknownIntegration)
+	require.ErrorIs(t, projection.Rebuild(ctx, appPool(t), accountA, uuid.New()),
+		projection.ErrUnknownIntegration)
+}
+
+// Review finding 7: the projection tables are droppable by definition, so they must not be
+// what stops an integration -- or, through its cascade, an account -- from being deleted.
+// 00002_accounts_delete_policy.sql exists precisely to keep that path open for operators.
+func TestProjectionTablesCascadeRatherThanBlockDeletion(t *testing.T) {
+	ctx := context.Background()
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+
+	appendEvents(t, accountID,
+		storable(withFee(trade(ledger.SideBuy, "1", "100", 1), "0.1", "USDT"),
+			accountID, integrationID, instrumentID))
+	project(t, accountID, integrationID)
+	require.Len(t, snapshot(t, accountID, integrationID), 1)
+
+	for _, table := range []string{"positions", "projection_cursors", "position_strategies"} {
+		var action string
+		require.NoError(t, ownerPool(t).QueryRow(ctx,
+			`SELECT confdeltype FROM pg_constraint
+			  WHERE conrelid = $1::regclass AND contype = 'f'
+			    AND confrelid = 'integrations'::regclass`, table).Scan(&action))
+		require.Equal(t, "c", action,
+			"%s must cascade when its integration is deleted, not block it", table)
+	}
+
+	// position_fees hangs off positions, so dropping the projection must take it too.
+	require.NoError(t, tenancy.InTxRaw(ctx, appPool(t), accountID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM positions WHERE integration_id = $1`, integrationID)
+		return err
+	}))
+	var remaining int
+	require.NoError(t, tenancy.InTxRaw(ctx, appPool(t), accountID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM position_fees WHERE integration_id = $1`,
+			integrationID).Scan(&remaining)
+	}))
+	require.Zero(t, remaining, "position_fees must cascade from positions")
+}

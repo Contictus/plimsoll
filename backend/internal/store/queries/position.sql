@@ -67,3 +67,11 @@ WHERE account_id = sqlc.arg(account_id) AND integration_id = sqlc.arg(integratio
 -- name: DropProjectionCursor :exec
 DELETE FROM projection_cursors
 WHERE account_id = sqlc.arg(account_id) AND integration_id = sqlc.arg(integration_id);
+
+-- name: IntegrationExists :one
+-- The projector names an integration; RLS makes another account's return zero rows rather
+-- than an error, so without this the fold succeeds having silently done nothing.
+SELECT EXISTS (
+  SELECT 1 FROM integrations
+  WHERE account_id = sqlc.arg(account_id) AND id = sqlc.arg(integration_id)
+);
