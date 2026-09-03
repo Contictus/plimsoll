@@ -78,6 +78,41 @@ documents — now confirmed from the source rather than assumed. Dropping `incom
 the key would collide a funding fee with a commission and silently deduplicate one away
 (L5, K19).
 
+### F4 — There is no "all my spot trades" endpoint
+
+`GET /api/v3/myTrades` requires `symbol`. So does `allOrders`. The only account endpoint
+that accepts an omitted symbol is `openOrders` (weight 6 with a symbol, 80 without), and
+open orders are not history.
+
+`GET /sapi/v1/accountSnapshot` does not rescue this either: **IP weight 2400**, and it
+"supports query within the last one month only". It is not a discovery tool, it is a
+liability.
+
+**So symbol discovery has to be solved by us, and it decides how M2's backfill is shaped.**
+An asset that was bought and fully sold leaves no trace in current balances and none in
+deposit or withdrawal history — the only record is its trades, which cannot be found
+without already knowing the symbol. Any discovery built from balances and transfers has
+that hole in it, and K26 exists precisely to refuse holes.
+
+The approach that has none: probe **every** spot symbol from `exchangeInfo` once, with
+`myTrades?symbol=X&limit=1`. Roughly 2–3k symbols at weight 20 is 40–60k weight — under
+ten minutes of a dedicated budget, once, for a full-history import. Symbols that come back
+empty are never queried again.
+
+### F5 — The 24-hour window binds `startTime`/`endTime`, not `fromId`
+
+The constraint is written as "the time between `startTime` and `endTime` can't be longer
+than 24 hours" — it is a constraint on the pair. The `fromId` path carries no documented
+time restriction and returns trades with id ≥ the value given.
+
+So a spot symbol's whole history is walked with `fromId` and `limit=1000`, one weight-20
+request per thousand trades, with no time chunking at all. The 24-hour window then matters
+only for the gap-resync path, where the window is known and small.
+
+**Confidence:** this is read from the phrasing, not from a sentence that states it
+outright. It is the first thing M2 verifies when it records its fixtures, and the backfill
+design falls back to 24-hour chunks if it turns out to be wrong.
+
 ---
 
 ## 2. Endpoints M2 needs
@@ -91,6 +126,8 @@ the key would collide a funding fee with a commission and silently deduplicate o
 | `GET /fapi/v3/positionRisk` | 5 | — | — | — |
 | `GET /sapi/v1/capital/deposit/hisrec` | 1 | max 1000, default 1000 | **≤ 90 days** | — |
 | `GET /sapi/v1/capital/withdraw/history` | 1 | max 1000 | **≤ 90 days** | — |
+| `GET /api/v3/exchangeInfo` | see docs | — | — | — |
+| `GET /sapi/v1/accountSnapshot` | **2400** | 7–30 snapshots | — | **1 month** |
 | `POST/PUT/DELETE /fapi/v1/listenKey` | 1 | — | — | — |
 
 Pagination differs by endpoint and the differences matter:
