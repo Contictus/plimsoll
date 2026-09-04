@@ -106,6 +106,7 @@ type LedgerEvent struct {
 	EventTime     time.Time
 	IngestedAt    time.Time
 	Raw           []byte
+	AssetID       *int64
 }
 
 type Position struct {

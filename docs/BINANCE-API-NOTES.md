@@ -258,6 +258,22 @@ Recorded so the M2 plan does not quietly assume them:
   cannot proceed on futures without an answer. See §4.
 - Whether `enableInternalTransfer` and `permitsUniversalTransfer` can move funds off the
   account or only between the user's own wallets. Rejected either way for the same reason.
+- **Withdrawal history cannot be normalized yet — two undocumented facts, both load-bearing.**
+  Checked twice on 2026-09-04, on the withdraw-history and withdraw pages.
+  1. The **status enum is not published**. The only text is the garbled fragment
+     `0(0 Sent, 2 Approval 3 4 6)` under the query parameter. Which code means "completed"
+     decides whether coins are recorded as having left the account, and getting it wrong in
+     either direction is a wrong balance.
+  2. The **timezone of `applyTime` / `completeTime` is not stated**. They arrive as
+     `"2019-10-12 11:12:02"`, not as epoch milliseconds like every other endpoint. An eight
+     hour error would corrupt the canonical order (L7) and every time-windowed
+     reconciliation.
+
+  Deposits have neither problem: their status list is published in full and `insertTime` is
+  epoch milliseconds, so `NormalizeDeposit` exists and `NormalizeWithdrawal` does not.
+  Encoding a remembered enum into append-only financial rows is exactly what `CLAUDE.md` §2
+  forbids. If this is ever settled, note that `raw` is stored verbatim (L15), so the fix is
+  a replay rather than a migration.
 - The complete `incomeType` enum. Eight were listed on the page read
   (`TRANSFER`, `WELCOME_BONUS`, `REALIZED_PNL`, `FUNDING_FEE`, `COMMISSION`,
   `INSURANCE_CLEAR`, `REFERRAL_KICKBACK`, `COMMISSION_REBATE`) and "14 additional types"
