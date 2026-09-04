@@ -39,6 +39,42 @@ func ttlSeconds(ttl time.Duration) (int32, error) {
 	return int32(ttl / time.Second), nil
 }
 
+// ErrLeaseLost means the caller no longer holds the lease it is writing under. Returned
+// from inside a transaction, so returning it rolls that transaction back: the guard and the
+// write it guards succeed or fail together.
+var ErrLeaseLost = errors.New("worker: the lease is no longer held")
+
+// GuardLease fails unless the caller still holds the lease, and is called inside the same
+// transaction as the write it protects.
+//
+// A worker that checked its lease and then wrote in a second transaction would leave a
+// window between the two for the lease to be lost in -- and a lease exists exactly to say
+// there is no such window. This is what makes "a worker that loses its lease writes nothing
+// further" a property of the database rather than a promise about the code path (L6, K20).
+func GuardLease(
+	ctx context.Context,
+	q *store.Queries,
+	accountID, integrationID uuid.UUID,
+	ownerID string,
+) error {
+	if ownerID == "" {
+		return ErrNoOwner
+	}
+	held, err := q.LeaseIsHeldBy(ctx, store.LeaseIsHeldByParams{
+		AccountID:     accountID,
+		IntegrationID: integrationID,
+		OwnerID:       ownerID,
+	})
+	if err != nil {
+		return fmt.Errorf("worker: check lease on %s: %w", integrationID, err)
+	}
+	if !held {
+		return fmt.Errorf("%w: %s is no longer the writer for %s",
+			ErrLeaseLost, ownerID, integrationID)
+	}
+	return nil
+}
+
 // Claim takes the lease for an integration, or reports that someone else holds it. Not
 // holding the lease is a normal outcome, not an error: on a fleet of workers most claims
 // lose, and a loss that arrived as an error would be logged as a failure every cycle.

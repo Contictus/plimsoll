@@ -502,19 +502,19 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
 ## Task 8: The lease, the supervisor, and telling the truth about state
 
 **Files:**
-- Create: `backend/migrations/00010_integration_leases.sql`
-- Create: `backend/internal/worker/lease.go`, `supervisor.go`
+- Create: `backend/migrations/00014_integration_leases.sql`
+- Create: `backend/internal/worker/lease.go`, `state.go`, `supervisor.go`
 - Modify: `backend/cmd/worker/main.go`, `backend/internal/httpapi/envelope.go`
 - Test: `backend/internal/worker/lease_integration_test.go`,
   `supervisor_integration_test.go`
 
 **Consumes:** every task above.
 **Produces:**
-- `worker.Claim(ctx, db, integrationID, ownerID) (bool, error)`, `.Heartbeat`, `.Release`
+- `worker.Claim(ctx, db, accountID, integrationID, ownerID, ttl) (bool, error)`, `.Heartbeat`, `.Release`, `.GuardLease`
 - `worker.Supervisor` with states `connecting · live · degraded · resyncing · backfilling`
 - `httpapi.ReasonHistoryTruncated` — a new reason code (see below)
 
-- [ ] **Step 1: Write the failing lease tests.**
+- [x] **Step 1: Write the failing lease tests.**
       - two workers race to claim one integration; **exactly one wins**. Run it with
         `-race` and with real concurrent transactions, because the claim is a single
         `INSERT … ON CONFLICT … WHERE expires_at < now()` and its whole value is that it
@@ -523,7 +523,7 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
       - a released lease is immediately claimable
       - a worker that stops heartbeating loses the lease after expiry
 
-- [ ] **Step 2: Add the freshness reason.** `history_truncated` joins the closed set in
+- [x] **Step 2: Add the freshness reason.** `history_truncated` joins the closed set in
       `ARCHITECTURE.md` §5 and `httpapi/envelope.go`, severity `warn`.
 
       **Why it is not `backfill_incomplete`:** that reason means "not finished yet", which
@@ -534,7 +534,7 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
       it certain for futures at M5. Adding it here means M5 reports it instead of inventing
       a reason under pressure.
 
-- [ ] **Step 3: Write the failing supervisor tests.**
+- [x] **Step 3: Write the failing supervisor tests.**
       - each state maps to exactly one freshness reason, asserted by walking the state
         enum — so a state added later without a reason fails here rather than shipping
         silent. This is the same shape as M0's default-deny route test
@@ -543,10 +543,27 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
       - backfill chunks are interleaved with realtime and never block it (K24 priority)
       - losing the lease stops the supervisor before it writes anything further
 
-- [ ] **Step 4: Run, implement, mutation-test** (let two workers claim; drop a state's
+- [x] **Step 4: Run, implement, mutation-test** (let two workers claim; drop a state's
       reason mapping; make the resync unbounded). **Commit.**
 
-- [ ] **Step 5: End-to-end against the real account.**
+> **Amended 2026-09-04, on implementation.**
+>
+> - **Steps 1-2 shipped before task 7**, not after. Task 7 adds the live stream, which is a
+>   second writer on an integration that already has one; building it before the lease
+>   existed would have meant knowingly shipping the race `00010` exists to detect.
+> - **`GuardLease` was added and is not in the plan.** "Losing the lease stops the
+>   supervisor before it writes anything further" is a promise a flag cannot keep -- there
+>   is a window between checking and writing. The guard runs inside the write's own
+>   transaction, so a stale worker's events roll back with it, and the property belongs to
+>   the database rather than to a code path.
+> - **Two mutation survivors were real gaps in the tests**, both fixed: one test was letting
+>   the guard and the heartbeat cover for each other, so neither was actually proven. It is
+>   now two tests -- one with the watchdog disabled, one with no event to refuse.
+
+- [ ] **Step 5: End-to-end against the real account.** **DEFERRED, NOT DONE** -- contact
+      with a real Binance account is deferred (decided 2026-09-04). M2 is therefore not
+      complete: the exit criteria below marked "against a real key" are unproven, and
+      `PROJECT.md` says so rather than rounding them up.
       Connect a real read-only key, run the full backfill, let the stream run, then:
 
       ```

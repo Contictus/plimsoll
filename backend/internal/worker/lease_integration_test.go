@@ -322,3 +322,70 @@ func TestALeaseTooShortToExpressIsRefused(t *testing.T) {
 	_, err = worker.Heartbeat(ctx, pool, accountID, integrationID, "worker-a", 0)
 	require.ErrorIs(t, err, worker.ErrTTLTooShort)
 }
+
+// A worker that lost its lease must not commit anything further, and "must not" is worth
+// more than a flag it checks on its way past. The guard runs inside the same transaction as
+// the write, so a stale worker's events roll back with it -- there is no window between
+// checking and writing for the lease to be lost in.
+func TestAWriteGuardedByALostLeaseCommitsNothing(t *testing.T) {
+	ctx := context.Background()
+	accountID, integrationID := seedIntegration(t)
+	pool := appPool(t)
+
+	held, err := worker.Claim(ctx, pool, accountID, integrationID, "worker-a", leaseTTL)
+	require.NoError(t, err)
+	require.True(t, held)
+
+	// The write goes through while the lease is held.
+	require.NoError(t, tenancy.InTx(ctx, pool, accountID, func(q *store.Queries) error {
+		if err := worker.GuardLease(ctx, q, accountID, integrationID, "worker-a"); err != nil {
+			return err
+		}
+		return q.OpenBackfillScope(ctx, store.OpenBackfillScopeParams{
+			AccountID: accountID, IntegrationID: integrationID, Scope: "deposits",
+		})
+	}))
+	require.Equal(t, 1, countScopes(t, accountID, integrationID))
+
+	// The lease lapses and another worker takes it.
+	expireLease(t, accountID, integrationID)
+	taken, err := worker.Claim(ctx, pool, accountID, integrationID, "worker-b", leaseTTL)
+	require.NoError(t, err)
+	require.True(t, taken)
+
+	err = tenancy.InTx(ctx, pool, accountID, func(q *store.Queries) error {
+		if err := worker.GuardLease(ctx, q, accountID, integrationID, "worker-a"); err != nil {
+			return err
+		}
+		return q.OpenBackfillScope(ctx, store.OpenBackfillScopeParams{
+			AccountID: accountID, IntegrationID: integrationID, Scope: "withdrawals",
+		})
+	})
+	require.ErrorIs(t, err, worker.ErrLeaseLost)
+	require.Equal(t, 1, countScopes(t, accountID, integrationID),
+		"the stale worker's write must roll back with the guard that refused it")
+}
+
+func countScopes(t *testing.T, accountID, integrationID uuid.UUID) int {
+	t.Helper()
+	ctx := context.Background()
+	var n int
+	require.NoError(t, tenancy.InTxRaw(ctx, ownerPool(t), accountID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT count(*) FROM backfill_progress WHERE integration_id = $1`,
+			integrationID).Scan(&n)
+	}))
+	return n
+}
+
+// seedAsset inserts a canonical asset as the owner. The registry is reference data with no
+// RLS and no write grant for the app role (00004), so this is the only way to create one.
+func seedAsset(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	require.NoError(t, ownerPool(t).QueryRow(context.Background(),
+		`INSERT INTO assets (canonical_symbol, kind) VALUES ($1, 'native') RETURNING id`,
+		"WK"+uuid.NewString()[:10],
+	).Scan(&id))
+	return id
+}
