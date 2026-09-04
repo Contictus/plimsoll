@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -131,6 +132,43 @@ func (q HistoryQuery) values() url.Values {
 		query.Set("limit", strconv.Itoa(q.Limit))
 	}
 	return query
+}
+
+// SpotSymbols lists every symbol exchangeInfo names, sorted and deduplicated. It is what
+// discovery sweeps: there is no endpoint returning spot trades across symbols (F4), so the
+// symbols have to be enumerated before any of them can be probed.
+//
+// No status filter. A symbol that is halted, broken, or no longer trading can still hold
+// the fills that acquired an asset, and a discovery that skipped it would leave exactly the
+// missing acquisition K26 refuses. What this cannot recover is a pair delisted outright:
+// exchangeInfo stops naming it, so it can no longer be probed -- a gap in what the exchange
+// will tell us, and one that belongs in freshness rather than in an assumption.
+func SpotSymbols(raw json.RawMessage) ([]string, error) {
+	var payload struct {
+		Symbols []struct {
+			Symbol string `json:"symbol"`
+		} `json:"symbols"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("binance: exchangeInfo has no symbols array: %w", err)
+	}
+
+	seen := make(map[string]bool, len(payload.Symbols))
+	out := make([]string, 0, len(payload.Symbols))
+	for i, entry := range payload.Symbols {
+		if entry.Symbol == "" {
+			return nil, fmt.Errorf(
+				"binance: exchangeInfo symbol %d has no name; a sweep over a list with holes"+
+					" in it reports a complete discovery it did not do", i)
+		}
+		if seen[entry.Symbol] {
+			continue
+		}
+		seen[entry.Symbol] = true
+		out = append(out, entry.Symbol)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // rateLimitEntry is one row of exchangeInfo's rateLimits array.
