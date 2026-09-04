@@ -46,6 +46,15 @@ type AssetAlias struct {
 	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
+type BackfillProgress struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	Scope         string
+	Cursor        string
+	CompletedAt   *time.Time
+	UpdatedAt     time.Time
+}
+
 type Instrument struct {
 	ID              int64
 	CanonicalSymbol string

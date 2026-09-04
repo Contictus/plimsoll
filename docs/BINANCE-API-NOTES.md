@@ -249,6 +249,15 @@ it has silently truncated. Degraded and visible beats confident and wrong, and t
 nothing to build.
 
 
+**F4 has a residual hole that discovery cannot close.** The sweep probes every symbol
+`exchangeInfo` names, which is every symbol *currently listed*. A pair delisted outright
+before the sweep runs is no longer named, so it cannot be probed, and an asset acquired and
+fully sold on it leaves no trace anywhere else -- not in balances, not in deposits, not in
+withdrawals. Discovery is therefore complete with respect to the list Binance will give us,
+not with respect to the account's history. Recorded here rather than papered over: it
+belongs in `freshness` (L11), and the honest fix needs a symbol list Binance does not
+publish.
+
 Recorded so the M2 plan does not quietly assume them:
 
 - The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.
