@@ -453,21 +453,21 @@ is not clever, and it is the only version with no hole in it.
 - Test: `backend/internal/exchange/binance/stream_test.go` (unit, fake WS server)
 
 **Produces:**
-- `binance.Stream` — `Subscribe(ctx) (<-chan json.RawMessage, error)`, `Close() error`
-- `binance.ErrGap`
+- `binance.Stream` — `Subscribe(ctx) (<-chan binance.Message, error)`, `Close() error`, `Connected()`, `UnreadableFrames()`
+- `binance.ErrGap`, `binance.GapError`, `binance.ErrSubscribeRejected`
 
 **F1 governs this task.** Spot `listenKey` was removed after the 2025-04-07 announcement;
 user data now arrives over the WebSocket API. Per the decision above we use
 `userDataStream.subscribe.signature`, which works with the HMAC key we already store. There
 is **no listenKey lifecycle here** — if this task grows one, it has copied a stale tutorial.
 
-- [ ] **Step 1: Record a stream fixture.** Run against the live account long enough to
+- [x] **Step 1: Record a stream fixture.** Run against the live account long enough to
       capture at least one `executionReport` and one `outboundAccountPosition`, redact,
       commit. If the account is quiet, place and cancel a far-from-market limit order by
       hand in the Binance UI — **not through the API**, which our key cannot do and must
       not be able to.
 
-- [ ] **Step 2: Write the failing tests** against a fake WS server:
+- [x] **Step 2: Write the failing tests** against a fake WS server:
       - a subscribe request is signed correctly and the connection carries the events
       - a dropped connection reconnects with backoff and re-subscribes
       - **a reconnect emits `ErrGap` for the window it was disconnected**, because events
@@ -478,8 +478,24 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
         account, which is the failure L11 exists to prevent
       - `Close` during a reconnect backoff returns promptly
 
-- [ ] **Step 3: Run, implement, mutation-test** (remove the gap signal; swallow the parse
+- [x] **Step 3: Run, implement, mutation-test** (remove the gap signal; swallow the parse
       counter). **Commit.**
+
+> **Amended 2026-09-04, on implementation.**
+>
+> - **Step 1 has no recorded fixture.** Contact with a real account is deferred, so the
+>   stream is tested against `execution_report_trade_bnbbtc.json` -- the fixture that
+>   already carries the documented envelope -- sent verbatim by a fake WebSocket server.
+>   `plimsollctl record` settles it in one command if a key ever appears.
+> - **The channel carries `Message`, not `json.RawMessage`.** A raw message cannot carry a
+>   gap, and a gap the consumer never hears about is the exact failure this stream exists to
+>   avoid.
+> - **`Connected()` exists alongside `ErrGap`.** They answer different questions: a gap is
+>   only reported once the connection is back, so a stream that has been down for an hour
+>   has emitted nothing. The supervisor reads `Connected()` to go degraded immediately.
+> - **Facts filled in from the docs** (`BINANCE-API-NOTES.md` section 1): the 24-hour
+>   connection lifetime, the ping/pong rule, the `{"subscriptionId", "event"}` envelope, and
+>   that the WebSocket API's signing rule is *not* the REST one.
 
 ---
 
