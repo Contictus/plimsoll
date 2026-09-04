@@ -16,5 +16,11 @@ Every file carries a `_source` key saying where its bytes came from:
 - `derived` — a hand-edited variant of one of the above, to reach a case a real account
   will not produce on demand (an over-permissioned key, a malformed frame).
 
+A payload that is a JSON **array** -- `myTrades`, the history endpoints -- has nowhere to
+put a key, so `plimsollctl record` wraps it: the metadata sits at the top level and the
+exchange's bytes sit under `payload`. Object payloads keep the metadata inline, as below.
+Wrapping one shape rather than annotating none is deliberate: the alternative is a file
+committed with no provenance at all.
+
 `_source` and `_why` are ours. Nothing reads them but a human; the parser ignores unknown
 fields by design, which is the same property that makes them safe to add.
