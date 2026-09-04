@@ -395,17 +395,27 @@ is not clever, and it is the only version with no hole in it.
       - deposits and withdrawals walk in **90-day** windows (their documented limit),
         which is a different chunking rule from trades — the test asserts the window size
         rather than trusting the caller
+      - **F5 does not hold:** a fake client whose `fromId=0` page returns the *most recent*
+        trades instead of the oldest must make the walk stop and raise
+        `backfill_incomplete`, not report a complete history. This is the test that stands
+        in for the verification we cannot run
 
 - [ ] **Step 3: Run and watch them fail.**
 
-- [ ] **Step 4: Implement.** Trades walk by `fromId` (F5), one weight-20 request per 1000
-      trades, cursor = last trade id seen. Deposits and withdrawals walk by time window,
+- [ ] **Step 4: Implement.** Trades walk by `fromId`, one weight-20 request per 1000
+      trades, cursor = last trade id seen. **F5 is checked at runtime, not assumed**
+      (amended 2026-09-04, see `BINANCE-API-NOTES.md` §5): no real key exists to settle
+      whether `fromId=0` returns the oldest trades, so the walk verifies that each page
+      begins where the previous one ended and stops with `backfill_incomplete` in
+      `freshness` if it does not (L11). Abandoning `fromId` is not the safe alternative --
+      a 24-hour walk from spot's 2017 launch is ~3,300 windows per symbol. Deposits and withdrawals walk by time window,
       cursor = window end. Every page is appended through `ledger.Append` inside
       `tenancy.InTx`, and the cursor advances **in the same transaction as the events it
       describes** — otherwise a crash between the two either loses events or replays them.
 
 - [ ] **Step 5: Mutation-test.** Advance the cursor in its own transaction; make the cursor
-      global rather than per scope; skip the probe-complete record. Each must fail a test.
+      global rather than per scope; skip the probe-complete record; drop the page-contiguity
+      check. Each must fail a test.
 
 - [ ] **Step 6: Commit.**
 

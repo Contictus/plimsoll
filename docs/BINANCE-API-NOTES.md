@@ -230,6 +230,25 @@ different answer.
 
 ## 5. What is still unverified
 
+> **Decided 2026-09-04.** Contact with a real Binance account is deferred as far as the
+> project allows, so nothing below will be settled by recording a payload in the near term.
+> Where an item shapes code, the code takes the defensive branch and says so; it does not
+> wait. `plimsollctl record` can settle any of these in one command if a key ever appears.
+
+**F5 is the one that shapes M2.** What the documentation *does* state is that `fromId`
+fetches from a trade id and that the 24-hour limit binds `startTime`/`endTime`. What it does
+not state is what `fromId=0` with no time range returns. The plan inferred "the oldest
+trades"; the inference is not verified.
+
+Abandoning `fromId` is not the safe alternative — a pure 24-hour walk from spot's 2017 launch
+is roughly 3,300 windows per symbol at weight 20, which is not a backfill anyone runs. So
+task 6 keeps `fromId` and **checks the inference at runtime instead of assuming it**: if the
+first page returned for `fromId=0` is not contiguous with the pages that follow, the walk
+stops and raises `backfill_incomplete` in `freshness` (L11) rather than reporting a history
+it has silently truncated. Degraded and visible beats confident and wrong, and this costs
+nothing to build.
+
+
 Recorded so the M2 plan does not quietly assume them:
 
 - The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.
