@@ -339,7 +339,17 @@ quietly broken.
 - [ ] **Step 2: Run and watch them fail.**
 
 - [ ] **Step 3: Implement.** `venue_event_id` is `spot:trade:<symbol>:<tradeId>` for both
-      paths; deposits use `spot:deposit:<txId>`, withdrawals `spot:withdrawal:<id>`.
+      paths; deposits use `spot:deposit:<id>`, withdrawals `spot:withdrawal:<id>`.
+
+      **Amended 2026-09-04: deposits key on Binance's `id`, not `txId`.** Two reasons, and
+      either alone is enough. `txId` is an on-chain transaction hash: it links the account
+      to a wallet, which is why the fixture recorder redacts it -- keying identity on a
+      field we refuse to store in a fixture is a contradiction, not a trade-off. And a
+      chain hash is not a record identifier: an internal transfer has no `txId` at all, and
+      nothing guarantees one hash maps to exactly one deposit row. `id` is Binance's own
+      record id, documented as a string and present on every row (verified against the
+      deposit history page on 2026-09-04). That is the identity L5 asks for -- from the
+      venue, and nothing else.
       `venue_sequence` is the venue's own id. `event_time` is the exchange's timestamp,
       never ours (K2).
 
