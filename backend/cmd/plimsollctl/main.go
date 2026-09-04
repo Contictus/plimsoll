@@ -25,20 +25,36 @@ func main() {
 	}
 }
 
+// run dispatches on the subcommand. The subcommand is split off before flag parsing:
+// flag.Parse stops at the first non-flag argument, so passing it the whole slice would
+// silently ignore every flag that follows the subcommand.
 func run(args []string) error {
-	const usage = "usage: plimsollctl invite -email <address> [-ttl 168h]"
+	const usage = "usage: plimsollctl <invite|record> ...\n" +
+		"  plimsollctl invite -email <address> [-ttl 168h]\n" +
+		"  " + recordUsage
 
-	// The subcommand is split off before flag parsing: flag.Parse stops at the first
-	// non-flag argument, so passing it the whole slice would silently ignore every flag
-	// that follows "invite".
-	if len(args) == 0 || args[0] != "invite" {
+	if len(args) == 0 {
 		return fmt.Errorf("%s", usage)
 	}
+	switch args[0] {
+	case "invite":
+		return runInvite(args[1:])
+	case "record":
+		ctx, cancel := context.WithTimeout(context.Background(), recordTimeout)
+		defer cancel()
+		return runRecord(ctx, args[1:])
+	default:
+		return fmt.Errorf("%s", usage)
+	}
+}
+
+func runInvite(args []string) error {
+	const usage = "usage: plimsollctl invite -email <address> [-ttl 168h]"
 
 	fs := flag.NewFlagSet("invite", flag.ContinueOnError)
 	email := fs.String("email", "", "email address the invite is bound to")
 	ttl := fs.Duration("ttl", 7*24*time.Hour, "how long the invite stays valid")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *email == "" {
