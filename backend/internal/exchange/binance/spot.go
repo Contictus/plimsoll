@@ -1,0 +1,177 @@
+package binance
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"time"
+)
+
+// Endpoint weights, each verified against the official documentation on 2026-09-04 and
+// recorded in docs/BINANCE-API-NOTES.md section 2. They are constants rather than literals
+// at the call site so a reviewer can check every number against the source without leaving
+// this file -- a wrong weight produces a plausible client and an IP ban.
+const (
+	weightExchangeInfo = 20 // GET /api/v3/exchangeInfo
+	weightAccount      = 20 // GET /api/v3/account
+	weightMyTrades     = 20 // GET /api/v3/myTrades without orderId
+	weightMyTradesByID = 5  // GET /api/v3/myTrades with orderId
+	weightDeposits     = 1  // GET /sapi/v1/capital/deposit/hisrec
+	weightWithdrawals  = 1  // GET /sapi/v1/capital/withdraw/history
+	weightRestrictions = 1  // GET /sapi/v1/account/apiRestrictions
+)
+
+// ErrNoRequestWeightLimit means exchangeInfo did not state a one-minute REQUEST_WEIGHT
+// ceiling. It is an error rather than a fallback because every fallback is a number that
+// will be wrong the day Binance changes theirs, and the way we would find out is the ban
+// (K24).
+var ErrNoRequestWeightLimit = errors.New(
+	"binance: exchangeInfo has no 1-minute REQUEST_WEIGHT limit")
+
+// ExchangeInfo returns trading rules and, more importantly here, the rateLimits array the
+// limiter's ceiling is read from. Unsigned: it carries no account data, and signing it
+// would mint a signature on every connect for nothing.
+func (c *Client) ExchangeInfo(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{path: "/api/v3/exchangeInfo", weight: weightExchangeInfo})
+}
+
+// Account returns balances and permissions for the key. Signed.
+func (c *Client) Account(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{path: "/api/v3/account", weight: weightAccount, signed: true})
+}
+
+// APIRestrictions returns the key's permission flags. It is what integration.Verify reads
+// to refuse anything that can do more than read (K9).
+func (c *Client) APIRestrictions(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path: "/sapi/v1/account/apiRestrictions", weight: weightRestrictions, signed: true,
+	})
+}
+
+// MyTradesQuery is one page of spot trade history. Symbol is required -- there is no
+// "all my trades" endpoint (F4), which is why discovery has to find the symbols first.
+type MyTradesQuery struct {
+	Symbol string
+	// FromID walks by trade id: trades with id >= FromID are returned. Nil means the most
+	// recent page. This is the strategy F5 rests on and it is not yet verified against a
+	// real account -- see docs/BINANCE-API-NOTES.md section 5.
+	FromID *int64
+	// OrderID narrows to one order and drops the weight from 20 to 5.
+	OrderID *int64
+	// StartTime and EndTime bound the page. Binance rejects a span over 24 hours, so a
+	// historical walk by time is a walk in 24-hour chunks (F5).
+	StartTime, EndTime time.Time
+	// Limit is capped at 1000 by the exchange; zero leaves Binance's default of 500.
+	Limit int
+}
+
+// MyTrades returns one page of spot trades for a symbol.
+func (c *Client) MyTrades(ctx context.Context, q MyTradesQuery) (json.RawMessage, error) {
+	if q.Symbol == "" {
+		return nil, fmt.Errorf("binance: myTrades needs a symbol; there is no all-trades endpoint")
+	}
+	query := url.Values{}
+	query.Set("symbol", q.Symbol)
+	setInt64(query, "fromId", q.FromID)
+	setInt64(query, "orderId", q.OrderID)
+	setTime(query, "startTime", q.StartTime)
+	setTime(query, "endTime", q.EndTime)
+	if q.Limit > 0 {
+		query.Set("limit", strconv.Itoa(q.Limit))
+	}
+
+	weight := weightMyTrades
+	if q.OrderID != nil {
+		weight = weightMyTradesByID
+	}
+	return c.do(ctx, request{
+		path: "/api/v3/myTrades", query: query, weight: weight, signed: true,
+	})
+}
+
+// HistoryQuery is the shared shape of the deposit and withdrawal endpoints, which page by
+// offset rather than by id and cap their span at 90 days.
+type HistoryQuery struct {
+	StartTime, EndTime time.Time
+	Offset, Limit      int
+}
+
+// DepositHistory returns deposits. A deposit is one half of a transfer, and matching it to
+// the withdrawal on the other side is what K12 does later.
+func (c *Client) DepositHistory(ctx context.Context, q HistoryQuery) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:   "/sapi/v1/capital/deposit/hisrec",
+		query:  q.values(),
+		weight: weightDeposits,
+		signed: true,
+	})
+}
+
+// WithdrawHistory returns withdrawals.
+func (c *Client) WithdrawHistory(ctx context.Context, q HistoryQuery) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:   "/sapi/v1/capital/withdraw/history",
+		query:  q.values(),
+		weight: weightWithdrawals,
+		signed: true,
+	})
+}
+
+func (q HistoryQuery) values() url.Values {
+	query := url.Values{}
+	setTime(query, "startTime", q.StartTime)
+	setTime(query, "endTime", q.EndTime)
+	if q.Offset > 0 {
+		query.Set("offset", strconv.Itoa(q.Offset))
+	}
+	if q.Limit > 0 {
+		query.Set("limit", strconv.Itoa(q.Limit))
+	}
+	return query
+}
+
+// rateLimitEntry is one row of exchangeInfo's rateLimits array.
+type rateLimitEntry struct {
+	RateLimitType string `json:"rateLimitType"`
+	Interval      string `json:"interval"`
+	IntervalNum   int    `json:"intervalNum"`
+	Limit         int    `json:"limit"`
+}
+
+// RequestWeightPerMinute reads the IP weight ceiling out of an exchangeInfo payload. It
+// accepts only a ceiling stated over exactly one minute: a REQUEST_WEIGHT limit expressed
+// over five minutes is not five times a one-minute budget, and dividing it down would
+// produce a number that is wrong in the direction that gets the IP banned.
+func RequestWeightPerMinute(raw json.RawMessage) (int, error) {
+	var payload struct {
+		RateLimits []rateLimitEntry `json:"rateLimits"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrNoRequestWeightLimit, err)
+	}
+	for _, entry := range payload.RateLimits {
+		if entry.RateLimitType != "REQUEST_WEIGHT" || entry.Interval != "MINUTE" {
+			continue
+		}
+		if entry.IntervalNum != 1 || entry.Limit <= 0 {
+			continue
+		}
+		return entry.Limit, nil
+	}
+	return 0, ErrNoRequestWeightLimit
+}
+
+func setInt64(query url.Values, key string, value *int64) {
+	if value != nil {
+		query.Set(key, strconv.FormatInt(*value, 10))
+	}
+}
+
+func setTime(query url.Values, key string, value time.Time) {
+	if !value.IsZero() {
+		query.Set(key, strconv.FormatInt(value.UnixMilli(), 10))
+	}
+}
