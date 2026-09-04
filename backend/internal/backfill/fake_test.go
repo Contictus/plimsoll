@@ -96,6 +96,14 @@ func (c *fakeClient) MyTrades(
 		return nil, errInjected
 	}
 
+	windowed := !q.StartTime.IsZero() || !q.EndTime.IsZero()
+	if windowed && q.FromID != nil {
+		// The venue's own refusal, mirrored. rest-api.md enumerates the supported parameter
+		// combinations and this is not one of them; a fake that answered it anyway would let
+		// a read pass here and be rejected against the real exchange.
+		return nil, fmt.Errorf("fake binance: %w", binance.ErrUnsupportedQuery)
+	}
+
 	all := append([]fakeTrade(nil), c.trades[q.Symbol]...)
 	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
 
@@ -104,20 +112,36 @@ func (c *fakeClient) MyTrades(
 		limit = 500 // Binance's documented default
 	}
 
-	// "If fromId is not sent, the most recent trades are returned" -- and, when
-	// newestOnZero is set, fromId=0 is answered the same way.
 	if c.stuckAtStart && q.FromID != nil && *q.FromID > 0 {
 		q.FromID = new(int64)
 	}
-	newest := q.FromID == nil || (c.newestOnZero && *q.FromID == 0)
+
 	var page []fakeTrade
 	switch {
-	case newest:
+	// "With startTime, returns oldest items from startTime up to the limit... With both,
+	// behaves like startTime but does not exceed endTime."
+	case windowed:
+		for _, t := range all {
+			if !q.StartTime.IsZero() && t.Time.Before(q.StartTime) {
+				continue
+			}
+			if !q.EndTime.IsZero() && !t.Time.Before(q.EndTime) {
+				continue
+			}
+			if len(page) < limit {
+				page = append(page, t)
+			}
+		}
+
+	// "If fromId is not sent, the most recent trades are returned" -- and, when
+	// newestOnZero is set, fromId=0 is answered the same way.
+	case q.FromID == nil || (c.newestOnZero && *q.FromID == 0):
 		if len(all) > limit {
 			page = all[len(all)-limit:]
 		} else {
 			page = all
 		}
+
 	default:
 		for _, t := range all {
 			if t.ID >= *q.FromID && len(page) < limit {

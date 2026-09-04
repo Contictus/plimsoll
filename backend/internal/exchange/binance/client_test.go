@@ -525,3 +525,51 @@ func TestMissingRequestWeightCeilingIsAnError(t *testing.T) {
 		})
 	}
 }
+
+// The documentation enumerates the parameter combinations myTrades supports, and
+// symbol + fromId + a time range is not one of them. Sending it anyway would be rejected
+// by the venue, and a rejected request in the gap-resync path leaves that window silently
+// unfilled -- the failure L11 exists to prevent. Refused here, where the caller can see
+// what it asked for.
+//
+// Quoted from rest-api.md on 2026-09-04: "These are the supported combinations of all
+// parameters: symbol; symbol + orderId; symbol + startTime; symbol + endTime;
+// symbol + fromId; symbol + startTime + endTime; symbol + orderId + fromId."
+func TestMyTradesRefusesAnUnsupportedParameterCombination(t *testing.T) {
+	client, _, _ := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("an unsupported combination must never reach the venue")
+		w.WriteHeader(http.StatusBadRequest)
+	})
+
+	from := int64(1)
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	for name, q := range map[string]binance.MyTradesQuery{
+		"fromId with startTime": {Symbol: "BTCUSDT", FromID: &from, StartTime: start},
+		"fromId with endTime":   {Symbol: "BTCUSDT", FromID: &from, EndTime: start},
+		"fromId with both":      {Symbol: "BTCUSDT", FromID: &from, StartTime: start, EndTime: start.Add(time.Hour)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := client.MyTrades(context.Background(), q)
+			require.ErrorIs(t, err, binance.ErrUnsupportedQuery)
+		})
+	}
+}
+
+// And a window wider than the documented 24 hours: "The time between startTime and endTime
+// can't be longer than 24 hours."
+func TestMyTradesRefusesAWindowWiderThanTheVenueAllows(t *testing.T) {
+	client, _, _ := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("an over-wide window must never reach the venue")
+		w.WriteHeader(http.StatusBadRequest)
+	})
+
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	_, err := client.MyTrades(context.Background(), binance.MyTradesQuery{
+		Symbol:    "BTCUSDT",
+		StartTime: start,
+		EndTime:   start.Add(binance.MaxTradeWindow + time.Second),
+	})
+	require.ErrorIs(t, err, binance.ErrUnsupportedQuery)
+	require.Contains(t, err.Error(), "24h")
+}
