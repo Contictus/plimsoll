@@ -40,18 +40,19 @@ var (
 	ErrMalformedTrade = errors.New("binance: trade payload is not usable")
 )
 
-// Resolver is the slice of the registries the normalizer needs. Declared as an interface
+// InstrumentResolver is the slice of the registries a trade needs. Declared as an interface
 // here so normalization stays a unit test with no Docker: the question these tests have to
 // answer is which *instant* the lookup was made at, and that needs a fake, not a database.
-type Resolver interface {
+type InstrumentResolver interface {
 	// Instrument returns the instrument behind an exchange symbol as it stood at `at`,
 	// which is always the event's own event_time -- never time.Now() (L8).
 	Instrument(ctx context.Context, market instrument.Market, symbol string, at time.Time) (int64, error)
 }
 
-// TradeContext is everything the payload cannot say: whose trade this is, and which path
-// saw it. The exchange knows none of it, so it is passed in rather than guessed.
-type TradeContext struct {
+// IngestContext is everything the payload cannot say: whose event this is, and which path
+// saw it. The exchange knows none of it, so it is passed in rather than guessed. Named for
+// ingestion rather than trading because deposits travel the same way.
+type IngestContext struct {
 	AccountID     uuid.UUID
 	IntegrationID uuid.UUID
 	Source        string
@@ -195,7 +196,7 @@ var nonFillExecutionTypes = map[string]bool{
 // raw is stored verbatim (L15): when a normalization bug surfaces months from now, the
 // thing that saves the project is replaying these exact bytes.
 func NormalizeSpotTrade(
-	ctx context.Context, r Resolver, tc TradeContext, raw json.RawMessage,
+	ctx context.Context, r InstrumentResolver, tc IngestContext, raw json.RawMessage,
 ) (ledger.Event, error) {
 	var trade restTrade
 	if err := json.Unmarshal(raw, &trade); err != nil {
@@ -222,7 +223,7 @@ func NormalizeSpotTrade(
 // event. It returns ErrNotAFill for the many updates that are not trades; the caller skips
 // those and treats every other error as a data-quality finding (K14).
 func NormalizeStreamExecutionReport(
-	ctx context.Context, r Resolver, tc TradeContext, raw json.RawMessage,
+	ctx context.Context, r InstrumentResolver, tc IngestContext, raw json.RawMessage,
 ) (ledger.Event, error) {
 	report, err := parseExecutionReport(raw)
 	if err != nil {
@@ -280,7 +281,7 @@ type tradeFields struct {
 }
 
 func buildTrade(
-	ctx context.Context, r Resolver, tc TradeContext, f tradeFields,
+	ctx context.Context, r InstrumentResolver, tc IngestContext, f tradeFields,
 ) (ledger.Event, error) {
 	if f.symbol == "" {
 		return ledger.Event{}, fmt.Errorf("%w: no symbol", ErrMalformedTrade)

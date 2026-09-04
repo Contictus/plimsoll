@@ -1,0 +1,56 @@
+{
+  "_source": "documented",
+  "_endpoint": "/sapi/v1/capital/deposit/hisrec",
+  "_why": "the example row printed on the deposit-history page, transcribed verbatim on 2026-09-04, then repeated with the statuses the normalizer must treat differently. The address and txId here are the documentation's own example values, not a real wallet.",
+  "_status_legend": "quoted from the docs: 0: pending, 1: success, 2: rejected, 6: credited but cannot withdraw, 7: Wrong Deposit, 8: Waiting User confirm",
+  "payload": [
+    {
+      "id": "769800519366885376",
+      "amount": "0.001",
+      "coin": "BNB",
+      "network": "BNB",
+      "status": 1,
+      "address": "bnb136ns6lfw4zs5hg4n85vdthaad7hq5m4gtkgf23",
+      "addressTag": "101764890",
+      "txId": "98A3EA560C6B3336D348B6C83F0F95ECE4F1F5919E94BD006E5BF3BF264FACFC",
+      "insertTime": 1661493146000,
+      "completeTime": 1661493146000,
+      "transferType": 0,
+      "confirmTimes": "1/1",
+      "unlockConfirm": 0,
+      "walletType": 0,
+      "travelRuleStatus": 0
+    },
+    {
+      "id": "769800519366885377",
+      "amount": "12.34500000",
+      "coin": "USDT",
+      "network": "ETH",
+      "status": 0,
+      "address": "0x0000000000000000000000000000000000000000",
+      "addressTag": "",
+      "txId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "insertTime": 1661493200000,
+      "transferType": 0,
+      "confirmTimes": "0/12",
+      "unlockConfirm": 0,
+      "walletType": 0
+    },
+    {
+      "id": "769800519366885378",
+      "amount": "5.00000000",
+      "coin": "USDT",
+      "network": "ETH",
+      "status": 6,
+      "address": "0x0000000000000000000000000000000000000000",
+      "addressTag": "",
+      "txId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "insertTime": 1661493300000,
+      "completeTime": 1661493300000,
+      "transferType": 0,
+      "confirmTimes": "12/12",
+      "unlockConfirm": 0,
+      "walletType": 0
+    }
+  ]
+}

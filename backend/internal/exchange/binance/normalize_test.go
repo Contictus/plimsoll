@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/asset"
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/Contictus/plimsoll/backend/internal/instrument"
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
@@ -25,8 +26,31 @@ const bnbbtcInstrument int64 = 4242
 type fakeResolver struct {
 	// windows maps a symbol to the instrument it resolved to during a half-open time
 	// window, so a test can prove the resolver was called with the trade's own time.
-	windows []aliasWindow
-	calls   []resolveCall
+	windows      []aliasWindow
+	calls        []resolveCall
+	assetWindows []aliasWindow
+	assetCalls   []resolveCall
+}
+
+// Asset resolves a coin ticker the same way, and records the instant it was asked for.
+func (f *fakeResolver) Asset(_ context.Context, symbol string, at time.Time) (int64, error) {
+	f.assetCalls = append(f.assetCalls, resolveCall{symbol, at})
+	for _, w := range f.assetWindows {
+		if w.symbol == symbol && !at.Before(w.from) && at.Before(w.to) {
+			return w.instrument, nil
+		}
+	}
+	return 0, asset.ErrUnknownSymbol
+}
+
+// assetResolverFor is the common case: one coin, always resolvable.
+func assetResolverFor(symbol string, id int64) *fakeResolver {
+	return &fakeResolver{assetWindows: []aliasWindow{{
+		symbol:     symbol,
+		from:       time.Unix(0, 0),
+		to:         time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC),
+		instrument: id,
+	}}}
 }
 
 type aliasWindow struct {
@@ -65,8 +89,8 @@ func resolverFor(symbol string, id int64) *fakeResolver {
 	}}}
 }
 
-func testContext() binance.TradeContext {
-	return binance.TradeContext{
+func testContext() binance.IngestContext {
+	return binance.IngestContext{
 		AccountID:     uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		IntegrationID: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 	}
