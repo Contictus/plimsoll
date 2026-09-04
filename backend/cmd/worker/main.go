@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Contictus/plimsoll/backend/internal/config"
+	"github.com/Contictus/plimsoll/backend/internal/crypto"
 	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 )
@@ -36,7 +36,9 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := config.CheckMasterKEK(os.Getenv("PLIMSOLL_MASTER_KEK")); err != nil {
+	// Same fail-fast as cmd/api, through the same constructor, so the two binaries cannot
+	// disagree about what a valid master key is (K25).
+	if _, err := crypto.NewEnvFileProvider(); err != nil {
 		return err
 	}
 
