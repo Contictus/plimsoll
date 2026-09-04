@@ -88,6 +88,14 @@ type Integration struct {
 	CredentialVerifiedAt *time.Time
 }
 
+type IntegrationLease struct {
+	IntegrationID uuid.UUID
+	AccountID     uuid.UUID
+	OwnerID       string
+	AcquiredAt    time.Time
+	ExpiresAt     time.Time
+}
+
 type Invite struct {
 	TokenHash  []byte
 	Email      string
