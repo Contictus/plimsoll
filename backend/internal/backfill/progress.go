@@ -198,7 +198,9 @@ func decodeRows(payload json.RawMessage, what string) ([]json.RawMessage, error)
 	return rows, nil
 }
 
-// symbolOf recovers the symbol from a trades scope: the reverse of ScopeTrades.
-func symbolOf(scope string) (string, bool) {
+// SymbolOf recovers the symbol from a trades scope: the reverse of ScopeTrades. Exported
+// for the same reason ScopeTrades is -- a second place that knows how a scope is spelled is
+// a second place for the two to disagree.
+func SymbolOf(scope string) (string, bool) {
 	return strings.CutPrefix(scope, scopeTradesPrefix)
 }

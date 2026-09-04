@@ -17,7 +17,7 @@ down to its events.
 
 | Document | Contains |
 |---|---|
-| `DECISIONS.md` | K1–K32: every architectural decision, its rationale and its cost |
+| `DECISIONS.md` | K1–K37: every architectural decision, its rationale and its cost |
 | `ARCHITECTURE.md` | Module boundaries, data flow, tenancy mechanics, worker model, schema deltas |
 | `COMPETITIVE-ANALYSIS.md` | Market segmentation, the gap, competitor failure modes |
 | `../CLAUDE.md` = `../AGENTS.md` | Agent operating manual: invariants, workflow, definition of done |
@@ -343,7 +343,7 @@ Directories are created when the module is written, not in advance.
 |---|---|---|
 | **M0** ✅ | Skeleton + tenancy foundation | `compose up` → `/healthz`; goose migrate; sqlc generate; OTel trace visible; two DB roles; `tenancy.InTx` wrapper; accounts/sessions/invites; **tenant isolation test green with the application-level `WHERE` deliberately removed** |
 | **M1** ✅ | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
-| **M2** | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption |
+| **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
 | **M3** | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
 | **M4** | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working |
@@ -352,6 +352,28 @@ Directories are created when the module is written, not in advance.
 | **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
 | **M7.5** | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock |
 | **M8** | Bybit + cross-venue transfers | Two sources normalized correctly into one portfolio; withdrawals match deposits |
+
+**M2 is code complete and not shipped.** Every piece is written and tested against
+recorded and documented fixtures: the signed REST client, the normalizer, the resumable
+backfill, the live WebSocket stream, the single-writer lease and the supervisor. `make
+test-integration` covers "backfill resumes after interruption" and "one identity for one
+trade across REST and WS" against a fake exchange.
+
+What is **not** proven, and will not be until a real read-only key exists:
+
+| Exit criterion | Status |
+|---|---|
+| Real account history → ledger | **unproven** — no account has been connected |
+| Idempotency across REST and WS, on real payloads | **partly** — proven on a derived fixture pair, not on one trade seen twice by a real account |
+| Backfill resumes after interruption | proven, against a fake exchange |
+| Rate limits respected; no 418 during a real backfill | **unproven** |
+
+Contact with a real Binance account was deferred by decision on 2026-09-04. Two design
+questions ride on that key and are answered defensively in the meantime rather than left
+open: **F5** (what `myTrades?fromId=0` returns) is checked at runtime and raises
+`backfill_incomplete` if the inference does not hold, and the **withdrawal status enum**
+is undocumented, so `NormalizeWithdrawal` does not exist rather than guessing. Both are
+recorded in `BINANCE-API-NOTES.md` §5.
 
 **Shipped.** M0 and M1 are complete; the exit criteria above are covered by the test
 suite (`make test`, `make test-integration`), and every invariant guard has been

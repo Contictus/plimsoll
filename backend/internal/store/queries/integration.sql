@@ -14,3 +14,8 @@ SELECT credential_ciphertext, wrapped_dek, key_version, credential_verified_at
 FROM integrations
 WHERE account_id = sqlc.arg(account_id)
   AND id = sqlc.arg(integration_id);
+
+-- name: WorkerActiveIntegrations :many
+-- The worker's only cross-account read, through the SECURITY DEFINER surface in 00015.
+-- Everything it does afterwards is bound to one account and scoped by RLS.
+SELECT * FROM worker_active_integrations();
