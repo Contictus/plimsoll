@@ -41,6 +41,31 @@ the **WebSocket API**:
 an HMAC secret, if we want the authenticated path. The signature variant avoids that and
 is the smaller change. This is a decision M2's plan has to take explicitly.
 
+> **Filled in 2026-09-04 while writing M2 task 7**, from `web-socket-api.md` and
+> `user-data-stream.md`. The row that said the spot subscription's expiry was "not
+> documented on the page read" is answered, and it is the *connection* that expires:
+>
+> - Base endpoint: `wss://ws-api.binance.com:443/ws-api/v3`
+> - **"A single connection to the API is only valid for 24 hours; expect to be disconnected
+>   after the 24-hour mark."** So a reconnect is routine, not exceptional, and a stream that
+>   does not reconnect stops working every day by design. Every reconnect is a gap.
+> - "The WebSocket server will send a `ping frame` every 20 seconds. If the WebSocket server
+>   does not receive a `pong frame` back from the connection within a minute the connection
+>   will be disconnected."
+> - Subscribe request, verbatim shape: `{"id": "...", "method":
+>   "userDataStream.subscribe.signature", "params": {"apiKey": ..., "timestamp": ...,
+>   "signature": ...}}`, with optional `recvWindow` (max 60000). Weight 2. Response:
+>   `{"id": "...", "status": 200, "result": {"subscriptionId": 0}}`.
+> - **Events arrive wrapped**: `{"subscriptionId": N, "event": {...}}`, "sent as JSON in
+>   text frames, one event per frame". The normalizer takes what is under `event`.
+> - `eventStreamTerminated` is a documented event, sent on unsubscribe, logout, or listen
+>   token expiry.
+> - A session supports up to 1,000 active subscriptions, and 65,535 over its lifetime.
+> - **Signing is not the REST rule.** REST signs the query string exactly as sent,
+>   percent-encoding included; the WebSocket API signs every param except `signature`,
+>   sorted alphabetically by name, joined as `name=value` with `&`, raw. Signing one the
+>   other's way mints a valid signature for a request nobody made.
+
 **USD-M futures still uses listenKey**, so the two markets do not share a realtime path:
 
 | | Spot | USD-M |
@@ -110,8 +135,13 @@ request per thousand trades, with no time chunking at all. The 24-hour window th
 only for the gap-resync path, where the window is known and small.
 
 **Confidence:** this is read from the phrasing, not from a sentence that states it
-outright. It is the first thing M2 verifies when it records its fixtures, and the backfill
-design falls back to 24-hour chunks if it turns out to be wrong.
+outright. It is the first thing M2 verifies when it records its fixtures.
+
+> **Corrected 2026-09-04.** The sentence that followed said the backfill "falls back to
+> 24-hour chunks if it turns out to be wrong". That was over-pessimistic and it is not what
+> task 6 built: a pure 24-hour walk from spot's 2017 launch is roughly 3,300 windows per
+> symbol at weight 20, which is not a backfill anyone runs. The walk keeps `fromId` and
+> checks the inference at runtime instead -- see section 5.
 
 ---
 
