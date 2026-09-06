@@ -50,6 +50,24 @@ const (
 	ReasonUnknownSymbol          = "unknown_symbol"
 	ReasonReconciliationMismatch = "reconciliation_mismatch"
 	ReasonFeePriceMissing        = "fee_price_missing"
+
+	// ReasonValuationUnavailable means no price source has run, so the response carries no
+	// total -- only subtotals per quote asset. It is a warning and not an error on purpose:
+	// every number present is exact, and marking an exact response unreliable erodes what
+	// `status` means just as surely as failing to mark a wrong one.
+	ReasonValuationUnavailable = "valuation_unavailable"
+
+	// ReasonIngestStalled means nothing is currently reading this integration: no worker has
+	// ever reported on it, or the one that did has stopped saying anything. Distinct from
+	// ws_gap, which is a worker that is running and telling you its feed is down. This one
+	// is the absence of a reporter, which is why it cannot be raised by a worker.
+	ReasonIngestStalled = "ingest_stalled"
+
+	// ReasonProjectionLagging means events are in the ledger that the fold has not reached,
+	// so the positions in this response are behind the events that produced them. Expected
+	// briefly and constantly -- the fold runs on a ticker (K38) -- and a warning rather than
+	// an error because the shortfall is bounded by that tick and closes on its own.
+	ReasonProjectionLagging = "projection_lagging"
 )
 
 // Reason explains one way in which a response is less than fully current. Detail is for a
