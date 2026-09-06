@@ -172,3 +172,9 @@ type Session struct {
 	ExpiresAt  time.Time
 	LastSeenAt time.Time
 }
+
+type WorkerIntegration struct {
+	IntegrationID uuid.UUID
+	AccountID     uuid.UUID
+	Runnable      bool
+}

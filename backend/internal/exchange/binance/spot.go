@@ -25,6 +25,18 @@ const (
 	weightRestrictions = 1  // GET /sapi/v1/account/apiRestrictions
 )
 
+// MaxTradeWindow is the widest startTime..endTime span myTrades will answer, quoted from
+// rest-api.md on 2026-09-04: "The time between startTime and endTime can't be longer than
+// 24 hours." It lives here rather than at the callers because it is a fact about the venue,
+// and two callers holding their own copy of it is two places for it to drift.
+const MaxTradeWindow = 24 * time.Hour
+
+// ErrUnsupportedQuery means the parameters asked for a combination the endpoint does not
+// accept. Refused before the request is sent, because the alternative is a rejection the
+// caller reads as "no trades" -- and in the gap-resync path that is a window silently left
+// unfilled (L11).
+var ErrUnsupportedQuery = errors.New("binance: unsupported parameter combination")
+
 // ErrNoRequestWeightLimit means exchangeInfo did not state a one-minute REQUEST_WEIGHT
 // ceiling. It is an error rather than a fallback because every fallback is a number that
 // will be wrong the day Binance changes theirs, and the way we would find out is the ban
@@ -69,10 +81,37 @@ type MyTradesQuery struct {
 	Limit int
 }
 
+// validate refuses combinations the documentation does not list.
+//
+// rest-api.md enumerates them, verbatim on 2026-09-04: "symbol; symbol + orderId;
+// symbol + startTime; symbol + endTime; symbol + fromId; symbol + startTime + endTime;
+// symbol + orderId + fromId." A time range with fromId is absent from that list, so a
+// historical walk by id and a walk by window are two strategies rather than one with an
+// optional parameter -- the same trap userTrades states outright for futures.
+func (q MyTradesQuery) validate() error {
+	hasWindow := !q.StartTime.IsZero() || !q.EndTime.IsZero()
+	if q.FromID != nil && hasWindow {
+		return fmt.Errorf(
+			"%w: myTrades takes fromId or a time range, never both", ErrUnsupportedQuery)
+	}
+	if !q.StartTime.IsZero() && !q.EndTime.IsZero() {
+		if span := q.EndTime.Sub(q.StartTime); span > MaxTradeWindow {
+			return fmt.Errorf("%w: %s..%s spans %s, and the venue answers at most 24h",
+				ErrUnsupportedQuery,
+				q.StartTime.UTC().Format(time.RFC3339), q.EndTime.UTC().Format(time.RFC3339),
+				span)
+		}
+	}
+	return nil
+}
+
 // MyTrades returns one page of spot trades for a symbol.
 func (c *Client) MyTrades(ctx context.Context, q MyTradesQuery) (json.RawMessage, error) {
 	if q.Symbol == "" {
 		return nil, fmt.Errorf("binance: myTrades needs a symbol; there is no all-trades endpoint")
+	}
+	if err := q.validate(); err != nil {
+		return nil, err
 	}
 	query := url.Values{}
 	query.Set("symbol", q.Symbol)

@@ -383,6 +383,91 @@ resolution:
 
 ---
 
+### K33 — F5 is checked at runtime, not assumed · `active`
+The documentation states that `myTrades?fromId=N` returns trades with id ≥ N, and that the
+24-hour limit binds `startTime`/`endTime`. It does not state what `fromId=0` returns with
+no time range. The plan inferred "the oldest trades"; the inference is not verified and no
+key exists to settle it.
+
+Abandoning `fromId` is not the safe alternative: a pure 24-hour walk from spot's 2017
+launch is roughly 3,300 windows per symbol at weight 20, which is not a backfill anyone
+runs. So the walk keeps `fromId` and **checks the inference before its first page** — two
+probes, and a per-page contiguity check after — stopping with `backfill_incomplete` if
+`fromId=0` turns out to anchor at the newest trade (L11).
+
+**Why this shape:** the failure it guards against is silent. A walk that assumed wrongly
+would read one page, find nothing after it, and record a complete history missing
+everything before — with plausible numbers and nothing to say so.
+
+---
+
+### K34 — Withdrawals are not normalized until their enum is published · `active`
+`NormalizeWithdrawal` does not exist. Two facts it needs are undocumented, both checked
+twice on 2026-09-04: the withdraw **status enum** appears only as the garbled fragment
+`0(0 Sent, 2 Approval 3 4 6)`, and the **timezone** of `applyTime`/`completeTime` — which
+arrive as `"2019-10-12 11:12:02"` rather than epoch milliseconds like every other endpoint
+— is stated nowhere.
+
+Which status means "completed" decides whether coins are recorded as having left the
+account, and an eight-hour timezone error corrupts the canonical order (L7) and every
+time-windowed reconciliation. The `withdrawals` scope name is reserved in migration 00013
+so that adding the walk later is code rather than a migration.
+
+**Why not guess:** encoding a remembered enum into append-only financial rows is precisely
+what `CLAUDE.md` §2 forbids, and the ledger cannot be corrected by an UPDATE (L2). Because
+`raw` is stored verbatim (L15), a later fix is a replay rather than a migration.
+
+---
+
+### K35 — The gap replay reads by time; the walk reads by id · `active`
+They are two strategies rather than one with an optional parameter, and that is forced.
+`rest-api.md` enumerates the parameter combinations `myTrades` accepts, and
+`symbol + fromId + startTime + endTime` is not among them. A windowed page that comes back
+full is therefore **halved** rather than paged, because there is no supported way to ask
+for the rest of that window.
+
+The replay also moves no cursor. The walk owns "how far back have we read"; a replay of ten
+minutes that touched that cursor would declare a symbol's whole history complete. Overlap
+is free instead: dedup on venue identity (L5) means a generous window costs requests and
+stores nothing twice.
+
+---
+
+### K36 — The worker's integration list is protected by privilege, not by RLS · `extends K15`
+A worker has to know which integrations to run before it knows whose they are, and RLS
+answers every cross-account question with an empty result. A `SECURITY DEFINER` function
+over `integrations` does not help either: `FORCE ROW LEVEL SECURITY` binds the owner too,
+so the function would run as the owner and still see nothing.
+
+So `integrations` keeps `FORCE ROW LEVEL SECURITY` and L12 needs no exception. Migration
+00015 adds `worker_integrations`, a lookup index of `(account_id, integration_id,
+runnable)` maintained by trigger, carrying no policy and no grant to `plimsoll_app` — the
+same shape `account_credentials` takes for login (00003), and the same rule that migration
+states: **anything reachable before authentication is protected by privilege, anything
+reachable after it is protected by RLS.**
+
+**Why a trigger:** an index a future writer can forget to update is an index that will be
+wrong, and being wrong here means an account whose trades are never ingested and nothing
+that says so.
+
+---
+
+### K37 — Losing the lease is enforced inside the write, not around it · `extends L6`
+"A worker that loses its lease writes nothing further" is a promise a flag cannot keep:
+between checking the flag and committing the write there is a window, and a lease exists
+precisely to say there is no such window.
+
+`worker.GuardLease` runs inside the same transaction as the write it protects, so a stale
+worker's events roll back with the guard that refused them. The property belongs to the
+database rather than to a code path.
+
+**How this was found:** the mutation that removed the guard survived, because the test was
+letting the guard and the heartbeat cover for each other. Neither was actually proven. It
+is now two tests — one with the watchdog disabled so only the guard can act, one with no
+event to refuse so only the heartbeat can.
+
+---
+
 ## Deliberately Out of Scope
 
 | Not doing | Why |

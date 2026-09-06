@@ -288,6 +288,23 @@ not with respect to the account's history. Recorded here rather than papered ove
 belongs in `freshness` (L11), and the honest fix needs a symbol list Binance does not
 publish.
 
+**Two more gaps found while wiring the worker (2026-09-04), both recorded rather than
+papered over:**
+
+- **`myTrades` does not accept `fromId` together with a time range.** rest-api.md
+  enumerates the supported combinations: `symbol`; `symbol + orderId`; `symbol + startTime`;
+  `symbol + endTime`; `symbol + fromId`; `symbol + startTime + endTime`;
+  `symbol + orderId + fromId`. So the historical walk and the gap replay are two strategies,
+  not one with an optional parameter, and a full windowed page is halved rather than paged
+  (K35). The client now refuses the combination before sending it, because a rejected
+  request in the replay path reads as an empty window.
+- **A deposit made while the stream is healthy is not picked up until the next walk.**
+  `balanceUpdate` is not normalized -- it reports a delta with no id to deduplicate on --
+  and the deposit walk stops once its scope completes. A deposit during a *stream gap* is
+  caught, because the replay reads the window. One during normal operation waits for the
+  next worker start. Not a design decision, a gap: closing it needs either a periodic
+  re-walk or an identity for `balanceUpdate`.
+
 Recorded so the M2 plan does not quietly assume them:
 
 - The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.

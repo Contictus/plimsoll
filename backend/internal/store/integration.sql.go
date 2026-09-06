@@ -76,3 +76,29 @@ func (q *Queries) SetIntegrationCredential(ctx context.Context, arg SetIntegrati
 	}
 	return result.RowsAffected(), nil
 }
+
+const workerActiveIntegrations = `-- name: WorkerActiveIntegrations :many
+SELECT integration_id, account_id, runnable FROM worker_active_integrations()
+`
+
+// The worker's only cross-account read, through the SECURITY DEFINER surface in 00015.
+// Everything it does afterwards is bound to one account and scoped by RLS.
+func (q *Queries) WorkerActiveIntegrations(ctx context.Context) ([]WorkerIntegration, error) {
+	rows, err := q.db.Query(ctx, workerActiveIntegrations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkerIntegration{}
+	for rows.Next() {
+		var i WorkerIntegration
+		if err := rows.Scan(&i.IntegrationID, &i.AccountID, &i.Runnable); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

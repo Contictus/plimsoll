@@ -576,7 +576,7 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
       - `Rebuild` reproduces the projection byte-identically (L3, now against real data)
       - re-running the backfill inserts **zero** rows (L5 across REST and WS, for real)
 
-- [ ] **Step 6: Update the docs.** Mark M2 in `PROJECT.md` §8; record this plan's decisions
+- [x] **Step 6: Update the docs.** Mark M2 in `PROJECT.md` §8; record this plan's decisions
       in `DECISIONS.md` as K33+; re-verify `BINANCE-API-NOTES.md` and correct anything the
       live API contradicted — especially F5.
 

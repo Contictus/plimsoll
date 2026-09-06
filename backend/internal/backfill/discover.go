@@ -115,7 +115,7 @@ func tradedSymbols(ctx context.Context, d Deps, t Target) ([]string, error) {
 	}
 	out := make([]string, 0, len(scopes))
 	for _, s := range scopes {
-		if symbol, ok := symbolOf(s.Scope); ok {
+		if symbol, ok := SymbolOf(s.Scope); ok {
 			out = append(out, symbol)
 		}
 	}
