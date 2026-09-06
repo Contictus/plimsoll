@@ -584,6 +584,31 @@ that cannot silently start pointing at a different position.
 
 ---
 
+### K43 — Lineage checks itself, and reports when it disagrees · `extends L3`
+
+`GET /positions/{id}/lineage` replays every event that folded into a position, through the
+same `position.Apply` the projector runs, and shows the state each one produced. It then
+compares the end of that replay against the stored projection row.
+
+If they differ, the response carries `lineage_mismatch` at severity `error`. It is the one
+reason code that accuses the system itself rather than the venue or the network, and it is
+unqualified: the product claim is that the numbers are right and we can prove it, so a
+proof that comes out different is the most serious thing this API can report. Serving the
+number silently, having just disproved it, is the failure L11 exists to name.
+
+**It only fires when both sides end on the same event.** A projection that is behind is
+normal — the fold runs on a ticker (K38) — and is already reported as `projection_lagging`.
+Calling that a disagreement would make the serious signal fire constantly and stop meaning
+anything, which is how a warning becomes wallpaper.
+
+**The cost:** a replay is the position's whole history, per call. That is honest for M3 and
+is what `position_snapshots` exists to fix (ARCHITECTURE.md §3). The invariant there —
+`snapshot(T) + events(T, T'] == full_fold(T')` — is the same equality this endpoint checks,
+which is not a coincidence: a snapshot is a cache, so adding one must change the timing of
+this check and never its answer.
+
+---
+
 ---
 
 ## Deliberately Out of Scope

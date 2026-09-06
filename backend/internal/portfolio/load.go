@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -104,6 +105,6 @@ func read(
 	return Input{
 		AsOf:      now,
 		Positions: positions,
-		Reasons:   ReasonsFor(statuses, lagging, now, leaseTTL),
+		Reasons:   append([]freshness.Reason{ValuationUnavailable(now)}, ReasonsFor(statuses, lagging, now, leaseTTL)...),
 	}, nil
 }

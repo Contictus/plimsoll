@@ -64,6 +64,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerHealth(api)
 	d.registerAuth(api)
 	d.registerPortfolio(api)
+	d.registerLineage(api)
 
 	return router
 }

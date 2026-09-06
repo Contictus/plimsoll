@@ -17,7 +17,7 @@ down to its events.
 
 | Document | Contains |
 |---|---|
-| `DECISIONS.md` | K1–K42: every architectural decision, its rationale and its cost |
+| `DECISIONS.md` | K1–K43: every architectural decision, its rationale and its cost |
 | `ARCHITECTURE.md` | Module boundaries, data flow, tenancy mechanics, worker model, schema deltas |
 | `COMPETITIVE-ANALYSIS.md` | Market segmentation, the gap, competitor failure modes |
 | `../CLAUDE.md` = `../AGENTS.md` | Agent operating manual: invariants, workflow, definition of done |
@@ -344,7 +344,7 @@ Directories are created when the module is written, not in advance.
 | **M0** ✅ | Skeleton + tenancy foundation | `compose up` → `/healthz`; goose migrate; sqlc generate; OTel trace visible; two DB roles; `tenancy.InTx` wrapper; accounts/sessions/invites; **tenant isolation test green with the application-level `WHERE` deliberately removed** |
 | **M1** ✅ | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
 | **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
-| **M3** | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
+| **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
 | **M4** | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working |
 | **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
@@ -379,6 +379,29 @@ recorded in `BINANCE-API-NOTES.md` §5.
 suite (`make test`, `make test-integration`), and every invariant guard has been
 mutation-tested — deliberately broken to confirm the test that guards it fails. M1 raised
 four contradictions the documents could not all satisfy; they are resolved as K29–K32.
+
+**M3 is shipped.** Both exit criteria are covered by integration tests against a real
+Postgres: a ledger is appended, folded and read back as a portfolio whose numbers are the
+fold's, and a position is opened down to every event that produced it with the state each
+one left behind.
+
+Two things were found while building it and are worth recording here rather than only in
+the register:
+
+- **Nothing was running the fold.** `projection.Project` shipped in M1, was tested, was
+  rebuild-equal, and no process called it -- so on a live system the ledger would have
+  filled while `positions` stayed empty. Every test in the package called `Project`
+  directly, which is exactly why none of them could notice that production never did.
+  Fixed in K38, and the test that guards it now runs a supervisor and never mentions the
+  projector.
+- **The lineage endpoint checks itself** (K43). It replays a position's events through the
+  same engine the projector uses and compares the result against the stored row; a
+  disagreement is reported as `lineage_mismatch` at severity `error` rather than served.
+
+What M3 does **not** have, by decision rather than omission: no total. M4 owns prices, so
+`GET /portfolio` reports subtotals per quote asset and carries `valuation_unavailable`
+(K40). Adding realized PnL denominated in USDT to realized PnL denominated in BTC would
+produce a number with no unit.
 
 **M0 comes first because tenancy cannot be retrofitted.** Adding `account_id` and RLS to
 a schema that already holds a real ledger means rebuilding every table.

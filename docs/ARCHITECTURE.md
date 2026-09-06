@@ -282,6 +282,7 @@ Replaces the boolean `stale` (K23, L11). It is API surface, not diagnostics:
 | `valuation_unavailable` | no price source has run, so the response carries subtotals per quote asset and no total (M3; M4 removes it) |
 | `ingest_stalled` | no worker is reading an integration, or the one that was has stopped reporting (K39) |
 | `projection_lagging` | events are in the ledger that the fold has not reached (K38) |
+| `lineage_mismatch` | replaying a position's events did not reproduce the stored projection (K43) |
 
 `status` is the worst severity present. A caller that reads nothing but `status` is
 still safe, which is the point.
