@@ -96,6 +96,15 @@ type IntegrationLease struct {
 	ExpiresAt     time.Time
 }
 
+type IntegrationStatus struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	State         string
+	OwnerID       string
+	Since         time.Time
+	UpdatedAt     time.Time
+}
+
 type Invite struct {
 	TokenHash  []byte
 	Email      string

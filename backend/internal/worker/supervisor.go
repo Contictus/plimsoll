@@ -10,6 +10,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
+	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
@@ -20,6 +21,11 @@ import (
 // myTrades range longer than 24 hours, so an unbounded resync is not a slow request -- it
 // is a rejected one, and a resync that fails leaves its window silently unfilled (L11).
 const maxResyncWindow = 24 * time.Hour
+
+// defaultProjectEvery is how often the fold runs when nothing says otherwise. Two seconds
+// is chosen from the reader's side, not the writer's: it is the longest a portfolio may
+// silently lag a fill before the lag is worth more than the transactions saved.
+const defaultProjectEvery = 2 * time.Second
 
 // ErrNotLeader means another worker holds the lease for this integration. It is a normal
 // outcome on a fleet, not a failure: most workers lose most claims.
@@ -55,6 +61,13 @@ type Stepper interface {
 	Step(ctx context.Context) (more bool, err error)
 }
 
+// Projector folds the ledger this supervisor is filling into the position projection. An
+// interface so a test can make the fold fail on demand; the default implementation is
+// LedgerProjector, built from the supervisor's own fields.
+type Projector interface {
+	Project(ctx context.Context) error
+}
+
 // SupervisorConfig is one integration's ingestion, assembled. Everything that touches time,
 // the network or the database is injected, so the supervisor's own logic is what the tests
 // exercise.
@@ -74,6 +87,23 @@ type SupervisorConfig struct {
 	Resync   Resyncer
 	Backfill Stepper
 
+	// Project folds what has been ingested into positions. Optional: left nil it becomes a
+	// LedgerProjector over this supervisor's own integration, which is what production
+	// wants and what a test asserting the fold actually runs must not have to supply.
+	Project Projector
+
+	// ProjectEvery is how often the fold runs. A ticker rather than a call per event: the
+	// fold is one transaction over every touched instrument, and running it per fill during
+	// a busy minute would cost a transaction each for a number nobody read in between. The
+	// cost of the interval is that a portfolio read can be that far behind the ledger, which
+	// is reported rather than hidden (projection_lagging).
+	ProjectEvery time.Duration
+
+	// OnProjectError is called when a fold fails and the supervisor carries on anyway. It
+	// is how an operator hears about it: this package holds no logger, and the alternative
+	// to a callback is a failure nobody outside the process ever sees (L11).
+	OnProjectError func(error)
+
 	Now func() time.Time
 }
 
@@ -87,8 +117,14 @@ type Supervisor struct {
 	cfg SupervisorConfig
 
 	mu         sync.Mutex
-	conditions Conditions
+	conditions ingest.Conditions
 	since      time.Time
+
+	// changed carries "the state is different now" to the watchdog, which is the only
+	// goroutine that writes. Buffered by one and never blocking: a change that arrives
+	// while one is already pending is the same news, and losing it would be losing the
+	// second of two identical messages.
+	changed chan struct{}
 }
 
 // NewSupervisor validates the configuration. It claims nothing and connects nothing; Run
@@ -115,21 +151,27 @@ func NewSupervisor(cfg SupervisorConfig) (*Supervisor, error) {
 		// single slow transaction does not hand the integration to another worker.
 		cfg.HeartbeatEvery = cfg.LeaseTTL / 3
 	}
-	return &Supervisor{cfg: cfg, since: cfg.Now()}, nil
+	if cfg.ProjectEvery <= 0 {
+		cfg.ProjectEvery = defaultProjectEvery
+	}
+	if cfg.Project == nil {
+		cfg.Project = LedgerProjector(cfg.DB, cfg.AccountID, cfg.IntegrationID, cfg.OwnerID)
+	}
+	return &Supervisor{cfg: cfg, since: cfg.Now(), changed: make(chan struct{}, 1)}, nil
 }
 
 // State is what this integration's ingestion is currently doing.
-func (s *Supervisor) State() State {
+func (s *Supervisor) State() ingest.State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Classify(s.conditions)
+	return ingest.Classify(s.conditions)
 }
 
 // Freshness is what the current state costs a reader, stamped with when it started. It is
 // what a portfolio response embeds, and it is why the state enum exists at all (L11, K23).
 func (s *Supervisor) Freshness() (httpapi.Reason, bool) {
 	s.mu.Lock()
-	state, since := Classify(s.conditions), s.since
+	state, since := ingest.Classify(s.conditions), s.since
 	s.mu.Unlock()
 
 	reason, degraded := state.Reason()
@@ -160,13 +202,20 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		_ = Release(releaseCtx, s.cfg.DB, s.cfg.AccountID, s.cfg.IntegrationID, s.cfg.OwnerID)
 	}()
 
+	// Published before the subscribe, not after it. Subscribing can block or fail, and a
+	// reader during that window must see "connecting" rather than whatever the last worker
+	// left behind -- possibly "live", from a process that is gone.
+	if err := s.publish(ctx); err != nil {
+		return err
+	}
+
 	messages, err := s.cfg.Stream.Subscribe(ctx)
 	if err != nil {
 		return fmt.Errorf("worker: subscribe %s: %w", s.cfg.IntegrationID, err)
 	}
 	defer func() { _ = s.cfg.Stream.Close() }()
 
-	s.update(func(c *Conditions) { c.Subscribed = true; c.Connected = s.cfg.Stream.Connected() })
+	s.update(func(c *ingest.Conditions) { c.Subscribed = true; c.Connected = s.cfg.Stream.Connected() })
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -177,12 +226,21 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	// looking calm (K24). The watchdog is separate again so that a lease lost while both
 	// are busy still stops them.
 	var wg sync.WaitGroup
-	failure := make(chan error, 3)
+	failure := make(chan error, 4)
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		if err := s.runBackfill(runCtx); err != nil {
+			failure <- err
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.runProjector(runCtx); err != nil {
 			failure <- err
 			cancel()
 		}
@@ -267,8 +325,8 @@ func (s *Supervisor) replay(ctx context.Context, gapErr error) error {
 		return fmt.Errorf("worker: stream on %s: %w", s.cfg.IntegrationID, gapErr)
 	}
 
-	s.update(func(c *Conditions) { c.Resyncing = true; c.Connected = s.cfg.Stream.Connected() })
-	defer s.update(func(c *Conditions) { c.Resyncing = false })
+	s.update(func(c *ingest.Conditions) { c.Resyncing = true; c.Connected = s.cfg.Stream.Connected() })
+	defer s.update(func(c *ingest.Conditions) { c.Resyncing = false })
 
 	for from := gap.From; from.Before(gap.To); {
 		to := from.Add(maxResyncWindow)
@@ -299,7 +357,7 @@ func (s *Supervisor) runBackfill(ctx context.Context) error {
 			return fmt.Errorf("worker: backfill on %s: %w", s.cfg.IntegrationID, err)
 		}
 		if !more {
-			s.update(func(c *Conditions) { c.HistoryComplete = true })
+			s.update(func(c *ingest.Conditions) { c.HistoryComplete = true })
 			return nil
 		}
 	}
@@ -316,11 +374,22 @@ func (s *Supervisor) runWatchdog(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-s.changed:
+			// A state change is news, and news waits for no ticker. Publishing here rather
+			// than in update() keeps every write for this integration on one goroutine,
+			// which is what makes "one writer" a property of the code and not of the
+			// schedule.
+			if err := s.publish(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 		case <-ticker.C:
 			// The connection first: a stream that stops delivering has to be reported at
 			// once. Its gap only arrives when the connection is back, so a supervisor that
 			// waited for it would show a live feed for the whole outage.
-			s.update(func(c *Conditions) { c.Connected = s.cfg.Stream.Connected() })
+			s.update(func(c *ingest.Conditions) { c.Connected = s.cfg.Stream.Connected() })
 
 			alive, err := Heartbeat(ctx, s.cfg.DB, s.cfg.AccountID, s.cfg.IntegrationID,
 				s.cfg.OwnerID, s.cfg.LeaseTTL)
@@ -334,18 +403,97 @@ func (s *Supervisor) runWatchdog(ctx context.Context) error {
 				return fmt.Errorf("%w: %s stopped holding %s",
 					ErrLeaseLost, s.cfg.OwnerID, s.cfg.IntegrationID)
 			}
+
+			// Republished on every tick even when nothing changed. The state is not the
+			// only thing the row carries: updated_at is how a reader tells a worker that is
+			// live now from one that was live when it died.
+			if err := s.publish(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
 		}
 	}
 }
 
 // update applies a change to the conditions and stamps when the state last changed, so
 // freshness can say how long it has been that way rather than only what is wrong.
-func (s *Supervisor) update(change func(*Conditions)) {
+func (s *Supervisor) update(change func(*ingest.Conditions)) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	before := Classify(s.conditions)
+	before := ingest.Classify(s.conditions)
 	change(&s.conditions)
-	if Classify(s.conditions) != before {
+	moved := ingest.Classify(s.conditions) != before
+	if moved {
 		s.since = s.cfg.Now()
 	}
+	s.mu.Unlock()
+
+	if !moved {
+		return
+	}
+	// Non-blocking on purpose. update runs on the stream and backfill goroutines, and a
+	// state change must never wait on the watchdog to be ready -- a supervisor that stalled
+	// its own ingestion to report on it would be reporting on nothing.
+	select {
+	case s.changed <- struct{}{}:
+	default:
+	}
+}
+
+// runProjector folds the ledger into the positions on a ticker, beside the ingestion that
+// is filling it.
+//
+// A failed fold does not stop the supervisor, and that asymmetry is the point. Live events
+// are the one thing that cannot be recovered: a stream not being read is data gone, while a
+// projection is by definition rebuildable from the ledger (L3). Killing ingestion because a
+// projection failed would trade a permanent loss for a temporary one.
+//
+// This is not the same as hiding it. A reader is told about a projection that has fallen
+// behind by the API comparing the cursor to the ledger, which is exactly the symptom of a
+// projector that is failing -- so the reader learns of it whether or not the worker is
+// alive to report it (L11). OnProjectError exists so an operator hears it too.
+func (s *Supervisor) runProjector(ctx context.Context) error {
+	ticker := time.NewTicker(s.cfg.ProjectEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := s.cfg.Project.Project(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				// A lost lease is the exception: it does not mean the fold failed, it
+				// means this worker is no longer entitled to run one, and everything else
+				// it is doing has to stop for the same reason.
+				if errors.Is(err, ErrLeaseLost) {
+					return err
+				}
+				if s.cfg.OnProjectError != nil {
+					s.cfg.OnProjectError(err)
+				}
+			}
+		}
+	}
+}
+
+// publish writes what this supervisor is doing where the API can read it, with the lease
+// checked in the same transaction. A worker that lost its lease stops describing an
+// integration it no longer writes -- the alternative is a dead worker's "live" outliving it
+// in the row a portfolio response is built from (K39).
+func (s *Supervisor) publish(ctx context.Context) error {
+	s.mu.Lock()
+	state, since := ingest.Classify(s.conditions), s.since
+	s.mu.Unlock()
+
+	return tenancy.InTx(ctx, s.cfg.DB, s.cfg.AccountID, func(q *store.Queries) error {
+		if err := GuardLease(ctx, q, s.cfg.AccountID, s.cfg.IntegrationID, s.cfg.OwnerID); err != nil {
+			return err
+		}
+		return ingest.Publish(ctx, q, s.cfg.AccountID, s.cfg.IntegrationID,
+			s.cfg.OwnerID, state, since)
+	})
 }
