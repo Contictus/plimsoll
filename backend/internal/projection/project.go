@@ -44,6 +44,42 @@ func requireIntegration(ctx context.Context, q *store.Queries, accountID, integr
 	return nil
 }
 
+// Guard is a permission check run inside the projection's own transaction, before anything
+// is read or written. It exists because the projector is a writer, and the single-writer
+// lease is what makes "exactly one writer per integration" true (K20, L6): a worker that
+// lost its lease between two ticks must fold nothing further, and a flag checked outside
+// the transaction cannot promise that -- there is always a window between the check and
+// the write.
+//
+// This package deliberately does not know what a lease is. It knows that a caller may have
+// a reason to refuse, and it runs that reason where refusing still means nothing was
+// committed.
+type Guard func(ctx context.Context, q *store.Queries) error
+
+// Option configures a projection run. Variadic rather than a config struct because the
+// common call -- a rebuild in a test, with no guard at all -- stays one argument.
+type Option func(*options)
+
+type options struct{ guard Guard }
+
+// WithGuard runs g inside the transaction and abandons the run if it returns an error.
+func WithGuard(g Guard) Option { return func(o *options) { o.guard = g } }
+
+func collect(opts []Option) options {
+	var o options
+	for _, apply := range opts {
+		apply(&o)
+	}
+	return o
+}
+
+func (o options) check(ctx context.Context, q *store.Queries) error {
+	if o.guard == nil {
+		return nil
+	}
+	return o.guard(ctx, q)
+}
+
 // Result says what a projection run actually did. Rebuilt is the interesting field: it
 // means events were found behind the cursor and the projection was rebuilt rather than
 // folded forward, which M2's supervisor reports rather than hides.
@@ -64,9 +100,16 @@ type Result struct {
 // The whole run is one transaction, so the rows and the cursor that describes them can
 // never disagree. That is also its limit -- a first backfill of millions of events is one
 // long transaction, and when M2 makes that real this is where the batching goes.
-func Project(ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID) (Result, error) {
+func Project(
+	ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID,
+	opts ...Option,
+) (Result, error) {
+	o := collect(opts)
 	var res Result
 	err := tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
+		if err := o.check(ctx, q); err != nil {
+			return err
+		}
 		if err := requireIntegration(ctx, q, accountID, integrationID); err != nil {
 			return err
 		}
@@ -139,8 +182,15 @@ func dropProjection(ctx context.Context, q *store.Queries, accountID, integratio
 // The drop and the fold share one transaction, so a rebuild that fails halfway leaves the
 // old projection in place rather than nothing at all. position_strategies is deliberately
 // untouched: the strategy tag is user input, not a fold output (D2).
-func Rebuild(ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID) error {
+func Rebuild(
+	ctx context.Context, db tenancy.Beginner, accountID, integrationID uuid.UUID,
+	opts ...Option,
+) error {
+	o := collect(opts)
 	return tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
+		if err := o.check(ctx, q); err != nil {
+			return err
+		}
 		if err := requireIntegration(ctx, q, accountID, integrationID); err != nil {
 			return err
 		}

@@ -466,6 +466,69 @@ letting the guard and the heartbeat cover for each other. Neither was actually p
 is now two tests — one with the watchdog disabled so only the guard can act, one with no
 event to refuse so only the heartbeat can.
 
+### K38 — The fold runs in the worker, on a ticker, under the same lease · `extends K20`
+
+M2 shipped a projector nothing called. `projection.Project` was written, tested and
+rebuild-equal; no process ran it. On a live system the ledger filled and `positions`
+stayed empty, and the first endpoint to read it would have answered "you hold nothing"
+for an account with a full history. Found while planning M3, not by a test — which is
+itself worth recording: every test in the package called `Project` directly, so none of
+them could notice that production never did.
+
+**Where it runs: the worker.** The fold is a write, and the single-writer lease exists so
+that exactly one process writes for an integration (K20, L6). Folding on read would put
+every API replica in that role at once, each advancing the same per-integration cursor.
+
+**When it runs: a ticker, not per event.** One fold is a transaction over every touched
+instrument. Running it per fill during a busy minute buys nothing — nobody read the
+number in between. Two seconds is chosen from the reader's side: the longest a portfolio
+may silently lag a fill before the lag costs more than the transactions saved.
+
+**What the interval costs, and who is told.** A portfolio read can be up to one tick
+behind the ledger. That is reported, not hidden: the API compares the projection cursor to
+the ledger and raises `projection_lagging` (L11).
+
+**A failed fold does not stop the ingestion.** The asymmetry is deliberate. Live events are
+the one thing that cannot be recovered — a stream nobody is reading is data gone. A
+projection is by definition rebuildable (L3). Killing ingestion because a projection failed
+trades a permanent loss for a temporary one. The reader still learns of it, because a
+projector that is failing and a projector that is behind look identical from the outside,
+and both raise the same reason.
+
+---
+
+### K39 — The worker publishes its state; the API does not ask for it · `extends K23`
+
+The supervisor already knows whether it is live, degraded, resyncing or backfilling, and
+already turns that into a freshness reason. It knows it *in the worker process's memory*.
+The API is a different process, and on a fleet a different machine.
+
+Without somewhere to put it, a portfolio response has no way to say "the live feed for
+this integration is down" — and would answer with numbers that look current because
+nothing contradicted them. That is the exact failure L11 exists to reject, so the state is
+published to `integration_status` rather than inferred.
+
+Three properties make the table honest rather than decorative:
+
+- **`since` moves only when the state changes.** A heartbeat republishing "degraded" every
+  forty seconds must not keep resetting how long it has been degraded, or an hour-long
+  outage reads as a fresh blip every time anyone looks. Enforced in the upsert, not in Go.
+- **`updated_at` moves on every heartbeat.** It is how a reader tells a worker that is live
+  now from one that was live when it died. A report older than one lease TTL is stale, and
+  a stale report is worse than any state it names.
+- **The publish is lease-guarded, inside its own transaction** (K37). A worker that lost
+  its lease stops describing an integration it no longer writes. Otherwise a dead worker's
+  "live" outlives it in the row every portfolio response is built from.
+
+An integration with **no** row is not "connecting" — it is "nobody is ingesting this",
+which is why the reader's query is a LEFT JOIN from `integrations` rather than a select
+over the status table. An inner join would hide precisely the case that matters most.
+
+This table is not a projection and not a source of truth: it is one writer's report about
+itself. Losing every row costs the reader its freshness detail and nothing else.
+
+---
+
 ---
 
 ## Deliberately Out of Scope

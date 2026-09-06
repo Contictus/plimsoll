@@ -1,10 +1,10 @@
-package worker_test
+package ingest_test
 
 import (
 	"testing"
 
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
-	"github.com/Contictus/plimsoll/backend/internal/worker"
+	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,12 +15,12 @@ import (
 // response that looks fully current while the worker is anything but (L11). Same shape as
 // M0's default-deny route test: the failure is the default.
 func TestEveryStateDeclaresWhatItMeansForFreshness(t *testing.T) {
-	require.NotEmpty(t, worker.AllStates)
-	for _, state := range worker.AllStates {
+	require.NotEmpty(t, ingest.AllStates)
+	for _, state := range ingest.AllStates {
 		t.Run(string(state), func(t *testing.T) {
 			reason, degraded := state.Reason()
 			if !degraded {
-				require.Equal(t, worker.StateLive, state,
+				require.Equal(t, ingest.StateLive, state,
 					"only live may contribute no reason; %s must say what it costs a reader", state)
 				return
 			}
@@ -46,7 +46,7 @@ func TestStateReasonsComeFromTheClosedSet(t *testing.T) {
 		httpapi.ReasonReconciliationMismatch: true,
 		httpapi.ReasonFeePriceMissing:        true,
 	}
-	for _, state := range worker.AllStates {
+	for _, state := range ingest.AllStates {
 		if reason, degraded := state.Reason(); degraded {
 			require.True(t, closed[reason.Code], "%s raises %q, which is not a reason code",
 				state, reason.Code)
@@ -60,25 +60,25 @@ func TestStateReasonsComeFromTheClosedSet(t *testing.T) {
 func TestTheStateIsTheWorstConditionCurrentlyTrue(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		in   worker.Conditions
-		want worker.State
+		in   ingest.Conditions
+		want ingest.State
 	}{
-		{"before the first subscribe", worker.Conditions{}, worker.StateConnecting},
-		{"subscribed and current", worker.Conditions{
-			Subscribed: true, Connected: true, HistoryComplete: true}, worker.StateLive},
-		{"history still loading", worker.Conditions{
-			Subscribed: true, Connected: true}, worker.StateBackfilling},
-		{"replaying a gap", worker.Conditions{
+		{"before the first subscribe", ingest.Conditions{}, ingest.StateConnecting},
+		{"subscribed and current", ingest.Conditions{
+			Subscribed: true, Connected: true, HistoryComplete: true}, ingest.StateLive},
+		{"history still loading", ingest.Conditions{
+			Subscribed: true, Connected: true}, ingest.StateBackfilling},
+		{"replaying a gap", ingest.Conditions{
 			Subscribed: true, Connected: true, HistoryComplete: true, Resyncing: true},
-			worker.StateResyncing},
-		{"feed is down", worker.Conditions{
-			Subscribed: true, HistoryComplete: true}, worker.StateDegraded},
-		{"down beats backfilling", worker.Conditions{Subscribed: true}, worker.StateDegraded},
-		{"down beats resyncing", worker.Conditions{
-			Subscribed: true, HistoryComplete: true, Resyncing: true}, worker.StateDegraded},
+			ingest.StateResyncing},
+		{"feed is down", ingest.Conditions{
+			Subscribed: true, HistoryComplete: true}, ingest.StateDegraded},
+		{"down beats backfilling", ingest.Conditions{Subscribed: true}, ingest.StateDegraded},
+		{"down beats resyncing", ingest.Conditions{
+			Subscribed: true, HistoryComplete: true, Resyncing: true}, ingest.StateDegraded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, worker.Classify(tc.in))
+			require.Equal(t, tc.want, ingest.Classify(tc.in))
 		})
 	}
 }

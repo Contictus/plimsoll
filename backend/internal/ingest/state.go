@@ -1,4 +1,11 @@
-package worker
+// Package ingest holds the vocabulary shared by the process that writes the ledger and the
+// process that reads it: what state an integration's ingestion is in, what that state costs
+// a reader, and the table the first process publishes it to for the second.
+//
+// It is its own package rather than part of worker so that the read API can depend on it
+// without depending on the exchange adapter. httpapi -> portfolio -> worker -> binance is a
+// dependency the read side must not have.
+package ingest
 
 import (
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"

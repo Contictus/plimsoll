@@ -161,6 +161,13 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 			Symbols: d.symbols,
 			Since:   since,
 		},
+		// A fold that fails does not stop the ingestion, so this is the only place an
+		// operator hears about it. Warn rather than Error: the reader is told independently
+		// by the API, and the ledger -- the part that cannot be rebuilt -- is still filling.
+		OnProjectError: func(err error) {
+			d.log.Warn("projection failed; ingestion continues",
+				"integration_id", assignment.IntegrationID, "error", err)
+		},
 	})
 	if err != nil {
 		return err
