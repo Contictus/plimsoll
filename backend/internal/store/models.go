@@ -46,6 +46,15 @@ type AssetAlias struct {
 	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
+type BackfillProgress struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	Scope         string
+	Cursor        string
+	CompletedAt   *time.Time
+	UpdatedAt     time.Time
+}
+
 type Instrument struct {
 	ID              int64
 	CanonicalSymbol string
@@ -79,6 +88,14 @@ type Integration struct {
 	CredentialVerifiedAt *time.Time
 }
 
+type IntegrationLease struct {
+	IntegrationID uuid.UUID
+	AccountID     uuid.UUID
+	OwnerID       string
+	AcquiredAt    time.Time
+	ExpiresAt     time.Time
+}
+
 type Invite struct {
 	TokenHash  []byte
 	Email      string
@@ -106,6 +123,7 @@ type LedgerEvent struct {
 	EventTime     time.Time
 	IngestedAt    time.Time
 	Raw           []byte
+	AssetID       *int64
 }
 
 type Position struct {

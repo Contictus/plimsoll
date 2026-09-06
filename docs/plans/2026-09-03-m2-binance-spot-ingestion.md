@@ -339,7 +339,17 @@ quietly broken.
 - [ ] **Step 2: Run and watch them fail.**
 
 - [ ] **Step 3: Implement.** `venue_event_id` is `spot:trade:<symbol>:<tradeId>` for both
-      paths; deposits use `spot:deposit:<txId>`, withdrawals `spot:withdrawal:<id>`.
+      paths; deposits use `spot:deposit:<id>`, withdrawals `spot:withdrawal:<id>`.
+
+      **Amended 2026-09-04: deposits key on Binance's `id`, not `txId`.** Two reasons, and
+      either alone is enough. `txId` is an on-chain transaction hash: it links the account
+      to a wallet, which is why the fixture recorder redacts it -- keying identity on a
+      field we refuse to store in a fixture is a contradiction, not a trade-off. And a
+      chain hash is not a record identifier: an internal transfer has no `txId` at all, and
+      nothing guarantees one hash maps to exactly one deposit row. `id` is Binance's own
+      record id, documented as a string and present on every row (verified against the
+      deposit history page on 2026-09-04). That is the identity L5 asks for -- from the
+      venue, and nothing else.
       `venue_sequence` is the venue's own id. `event_time` is the exchange's timestamp,
       never ours (K2).
 
@@ -353,14 +363,16 @@ quietly broken.
 ## Task 6: Discovery and the resumable backfill
 
 **Files:**
-- Create: `backend/migrations/00009_backfill_progress.sql`
-- Create: `backend/internal/backfill/discover.go`, `walk.go`
-- Test: `backend/internal/backfill/backfill_integration_test.go`
+- Create: `backend/migrations/00013_backfill_progress.sql`
+- Create: `backend/internal/backfill/progress.go`, `discover.go`, `trades.go`, `deposits.go`
+- Test: `backend/internal/backfill/{setup,fake,trades,discover,deposits}_*_test.go`
 
 **Consumes:** tasks 3–5.
 **Produces:**
-- `backfill.Discover(ctx, c *binance.Client, integrationID) ([]string, error)`
-- `backfill.Walk(ctx, deps, accountID, integrationID, symbol string) error`
+- `backfill.Discover(ctx, d Deps, t Target, symbols []string) ([]string, error)`
+- `backfill.WalkTrades(ctx, d Deps, t Target, symbol string) error`
+- `backfill.WalkDeposits(ctx, d Deps, t Target, since time.Time) error`
+- `binance.SpotSymbols(raw) ([]string, error)` -- the list the sweep probes
 - `backfill.Progress{Scope string, Cursor string, CompletedAt *time.Time}`
 
 **Why this task is shaped the way it is (F4).** There is no endpoint that returns spot
@@ -375,12 +387,12 @@ thousand symbols at weight 20 is 40–60k weight: under ten minutes of a dedicat
 once per integration, at backfill priority where it cannot starve anyone's live stream. It
 is not clever, and it is the only version with no hole in it.
 
-- [ ] **Step 1: Write the migration.** `backfill_progress (account_id, integration_id,
+- [x] **Step 1: Write the migration.** `backfill_progress (account_id, integration_id,
       scope, cursor, completed_at, updated_at)`, PK `(integration_id, scope)`. `scope` is
       `discover` or `trades:<symbol>` or `deposits` or `withdrawals`. Tenant table: RLS
       enabled and forced, `account_id` on the row (L12).
 
-- [ ] **Step 2: Write the failing integration tests.**
+- [x] **Step 2: Write the failing integration tests.**
       - **resume:** walk a symbol, kill it halfway (return a context error after N pages),
         walk again — every trade lands exactly once and none is skipped. This is the M2
         exit criterion "backfill resumes after interruption"
@@ -395,19 +407,42 @@ is not clever, and it is the only version with no hole in it.
       - deposits and withdrawals walk in **90-day** windows (their documented limit),
         which is a different chunking rule from trades — the test asserts the window size
         rather than trusting the caller
+      - **F5 does not hold:** a fake client whose `fromId=0` page returns the *most recent*
+        trades instead of the oldest must make the walk stop and raise
+        `backfill_incomplete`, not report a complete history. This is the test that stands
+        in for the verification we cannot run
 
-- [ ] **Step 3: Run and watch them fail.**
+- [x] **Step 3: Run and watch them fail.**
 
-- [ ] **Step 4: Implement.** Trades walk by `fromId` (F5), one weight-20 request per 1000
-      trades, cursor = last trade id seen. Deposits and withdrawals walk by time window,
+- [x] **Step 4: Implement.** Trades walk by `fromId`, one weight-20 request per 1000
+      trades, cursor = last trade id seen. **F5 is checked at runtime, not assumed**
+      (amended 2026-09-04, see `BINANCE-API-NOTES.md` §5): no real key exists to settle
+      whether `fromId=0` returns the oldest trades, so the walk verifies that each page
+      begins where the previous one ended and stops with `backfill_incomplete` in
+      `freshness` if it does not (L11). Abandoning `fromId` is not the safe alternative --
+      a 24-hour walk from spot's 2017 launch is ~3,300 windows per symbol. Deposits and withdrawals walk by time window,
       cursor = window end. Every page is appended through `ledger.Append` inside
       `tenancy.InTx`, and the cursor advances **in the same transaction as the events it
       describes** — otherwise a crash between the two either loses events or replays them.
 
-- [ ] **Step 5: Mutation-test.** Advance the cursor in its own transaction; make the cursor
-      global rather than per scope; skip the probe-complete record. Each must fail a test.
+- [x] **Step 5: Mutation-test.** Advance the cursor in its own transaction; make the cursor
+      global rather than per scope; skip the probe-complete record; drop the page-contiguity
+      check. Each must fail a test.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
+
+> **Amended 2026-09-04, on implementation.** Two things this task planned are not in it,
+> both deliberately:
+>
+> - **No withdrawal walk.** `NormalizeWithdrawal` does not exist -- the withdraw status enum
+>   and the timezone of `applyTime` are both undocumented (`BINANCE-API-NOTES.md` section 5)
+>   -- so a walk would have nowhere to put what it read. The `withdrawals` scope name is
+>   reserved in `00013` so that adding the walk later is code, not a migration.
+> - **Discovery has a residual hole and says so.** `exchangeInfo` names only currently
+>   listed symbols, so a pair delisted before the sweep cannot be probed. The sweep is
+>   complete with respect to the list Binance will give us, not with respect to the account.
+>   Recorded in `BINANCE-API-NOTES.md` section 5 and in `discover.go`; it belongs in
+>   `freshness` (L11), which task 8 wires.
 
 ---
 
@@ -418,21 +453,21 @@ is not clever, and it is the only version with no hole in it.
 - Test: `backend/internal/exchange/binance/stream_test.go` (unit, fake WS server)
 
 **Produces:**
-- `binance.Stream` — `Subscribe(ctx) (<-chan json.RawMessage, error)`, `Close() error`
-- `binance.ErrGap`
+- `binance.Stream` — `Subscribe(ctx) (<-chan binance.Message, error)`, `Close() error`, `Connected()`, `UnreadableFrames()`
+- `binance.ErrGap`, `binance.GapError`, `binance.ErrSubscribeRejected`
 
 **F1 governs this task.** Spot `listenKey` was removed after the 2025-04-07 announcement;
 user data now arrives over the WebSocket API. Per the decision above we use
 `userDataStream.subscribe.signature`, which works with the HMAC key we already store. There
 is **no listenKey lifecycle here** — if this task grows one, it has copied a stale tutorial.
 
-- [ ] **Step 1: Record a stream fixture.** Run against the live account long enough to
+- [x] **Step 1: Record a stream fixture.** Run against the live account long enough to
       capture at least one `executionReport` and one `outboundAccountPosition`, redact,
       commit. If the account is quiet, place and cancel a far-from-market limit order by
       hand in the Binance UI — **not through the API**, which our key cannot do and must
       not be able to.
 
-- [ ] **Step 2: Write the failing tests** against a fake WS server:
+- [x] **Step 2: Write the failing tests** against a fake WS server:
       - a subscribe request is signed correctly and the connection carries the events
       - a dropped connection reconnects with backoff and re-subscribes
       - **a reconnect emits `ErrGap` for the window it was disconnected**, because events
@@ -443,8 +478,24 @@ is **no listenKey lifecycle here** — if this task grows one, it has copied a s
         account, which is the failure L11 exists to prevent
       - `Close` during a reconnect backoff returns promptly
 
-- [ ] **Step 3: Run, implement, mutation-test** (remove the gap signal; swallow the parse
+- [x] **Step 3: Run, implement, mutation-test** (remove the gap signal; swallow the parse
       counter). **Commit.**
+
+> **Amended 2026-09-04, on implementation.**
+>
+> - **Step 1 has no recorded fixture.** Contact with a real account is deferred, so the
+>   stream is tested against `execution_report_trade_bnbbtc.json` -- the fixture that
+>   already carries the documented envelope -- sent verbatim by a fake WebSocket server.
+>   `plimsollctl record` settles it in one command if a key ever appears.
+> - **The channel carries `Message`, not `json.RawMessage`.** A raw message cannot carry a
+>   gap, and a gap the consumer never hears about is the exact failure this stream exists to
+>   avoid.
+> - **`Connected()` exists alongside `ErrGap`.** They answer different questions: a gap is
+>   only reported once the connection is back, so a stream that has been down for an hour
+>   has emitted nothing. The supervisor reads `Connected()` to go degraded immediately.
+> - **Facts filled in from the docs** (`BINANCE-API-NOTES.md` section 1): the 24-hour
+>   connection lifetime, the ping/pong rule, the `{"subscriptionId", "event"}` envelope, and
+>   that the WebSocket API's signing rule is *not* the REST one.
 
 ---
 

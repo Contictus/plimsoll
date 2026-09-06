@@ -30,9 +30,17 @@ const (
 // free strings so a new degradation has to be named here, where a client contract change
 // is visible, instead of appearing in a response as a typo nobody can match on.
 const (
-	ReasonWSGap                  = "ws_gap"
-	ReasonPriceStale             = "price_stale"
-	ReasonBackfillIncomplete     = "backfill_incomplete"
+	ReasonWSGap              = "ws_gap"
+	ReasonPriceStale         = "price_stale"
+	ReasonBackfillIncomplete = "backfill_incomplete"
+
+	// ReasonHistoryTruncated is deliberately not ReasonBackfillIncomplete. "Incomplete"
+	// means not finished yet -- recoverable, and it implies waiting will fix it. This one
+	// says the venue will never return data before a cutoff, which is a permanent claim
+	// about what can be known. Telling a user to wait for something that will not arrive is
+	// the confident-and-wrong failure L11 exists to reject.
+	ReasonHistoryTruncated = "history_truncated"
+
 	ReasonAssumedPeg             = "assumed_peg"
 	ReasonUnknownSymbol          = "unknown_symbol"
 	ReasonReconciliationMismatch = "reconciliation_mismatch"

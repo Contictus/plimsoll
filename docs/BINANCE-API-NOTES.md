@@ -41,6 +41,31 @@ the **WebSocket API**:
 an HMAC secret, if we want the authenticated path. The signature variant avoids that and
 is the smaller change. This is a decision M2's plan has to take explicitly.
 
+> **Filled in 2026-09-04 while writing M2 task 7**, from `web-socket-api.md` and
+> `user-data-stream.md`. The row that said the spot subscription's expiry was "not
+> documented on the page read" is answered, and it is the *connection* that expires:
+>
+> - Base endpoint: `wss://ws-api.binance.com:443/ws-api/v3`
+> - **"A single connection to the API is only valid for 24 hours; expect to be disconnected
+>   after the 24-hour mark."** So a reconnect is routine, not exceptional, and a stream that
+>   does not reconnect stops working every day by design. Every reconnect is a gap.
+> - "The WebSocket server will send a `ping frame` every 20 seconds. If the WebSocket server
+>   does not receive a `pong frame` back from the connection within a minute the connection
+>   will be disconnected."
+> - Subscribe request, verbatim shape: `{"id": "...", "method":
+>   "userDataStream.subscribe.signature", "params": {"apiKey": ..., "timestamp": ...,
+>   "signature": ...}}`, with optional `recvWindow` (max 60000). Weight 2. Response:
+>   `{"id": "...", "status": 200, "result": {"subscriptionId": 0}}`.
+> - **Events arrive wrapped**: `{"subscriptionId": N, "event": {...}}`, "sent as JSON in
+>   text frames, one event per frame". The normalizer takes what is under `event`.
+> - `eventStreamTerminated` is a documented event, sent on unsubscribe, logout, or listen
+>   token expiry.
+> - A session supports up to 1,000 active subscriptions, and 65,535 over its lifetime.
+> - **Signing is not the REST rule.** REST signs the query string exactly as sent,
+>   percent-encoding included; the WebSocket API signs every param except `signature`,
+>   sorted alphabetically by name, joined as `name=value` with `&`, raw. Signing one the
+>   other's way mints a valid signature for a request nobody made.
+
 **USD-M futures still uses listenKey**, so the two markets do not share a realtime path:
 
 | | Spot | USD-M |
@@ -110,8 +135,13 @@ request per thousand trades, with no time chunking at all. The 24-hour window th
 only for the gap-resync path, where the window is known and small.
 
 **Confidence:** this is read from the phrasing, not from a sentence that states it
-outright. It is the first thing M2 verifies when it records its fixtures, and the backfill
-design falls back to 24-hour chunks if it turns out to be wrong.
+outright. It is the first thing M2 verifies when it records its fixtures.
+
+> **Corrected 2026-09-04.** The sentence that followed said the backfill "falls back to
+> 24-hour chunks if it turns out to be wrong". That was over-pessimistic and it is not what
+> task 6 built: a pure 24-hour walk from spot's 2017 launch is roughly 3,300 windows per
+> symbol at weight 20, which is not a backfill anyone runs. The walk keeps `fromId` and
+> checks the inference at runtime instead -- see section 5.
 
 ---
 
@@ -230,6 +260,34 @@ different answer.
 
 ## 5. What is still unverified
 
+> **Decided 2026-09-04.** Contact with a real Binance account is deferred as far as the
+> project allows, so nothing below will be settled by recording a payload in the near term.
+> Where an item shapes code, the code takes the defensive branch and says so; it does not
+> wait. `plimsollctl record` can settle any of these in one command if a key ever appears.
+
+**F5 is the one that shapes M2.** What the documentation *does* state is that `fromId`
+fetches from a trade id and that the 24-hour limit binds `startTime`/`endTime`. What it does
+not state is what `fromId=0` with no time range returns. The plan inferred "the oldest
+trades"; the inference is not verified.
+
+Abandoning `fromId` is not the safe alternative — a pure 24-hour walk from spot's 2017 launch
+is roughly 3,300 windows per symbol at weight 20, which is not a backfill anyone runs. So
+task 6 keeps `fromId` and **checks the inference at runtime instead of assuming it**: if the
+first page returned for `fromId=0` is not contiguous with the pages that follow, the walk
+stops and raises `backfill_incomplete` in `freshness` (L11) rather than reporting a history
+it has silently truncated. Degraded and visible beats confident and wrong, and this costs
+nothing to build.
+
+
+**F4 has a residual hole that discovery cannot close.** The sweep probes every symbol
+`exchangeInfo` names, which is every symbol *currently listed*. A pair delisted outright
+before the sweep runs is no longer named, so it cannot be probed, and an asset acquired and
+fully sold on it leaves no trace anywhere else -- not in balances, not in deposits, not in
+withdrawals. Discovery is therefore complete with respect to the list Binance will give us,
+not with respect to the account's history. Recorded here rather than papered over: it
+belongs in `freshness` (L11), and the honest fix needs a symbol list Binance does not
+publish.
+
 Recorded so the M2 plan does not quietly assume them:
 
 - The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.
@@ -239,6 +297,22 @@ Recorded so the M2 plan does not quietly assume them:
   cannot proceed on futures without an answer. See §4.
 - Whether `enableInternalTransfer` and `permitsUniversalTransfer` can move funds off the
   account or only between the user's own wallets. Rejected either way for the same reason.
+- **Withdrawal history cannot be normalized yet — two undocumented facts, both load-bearing.**
+  Checked twice on 2026-09-04, on the withdraw-history and withdraw pages.
+  1. The **status enum is not published**. The only text is the garbled fragment
+     `0(0 Sent, 2 Approval 3 4 6)` under the query parameter. Which code means "completed"
+     decides whether coins are recorded as having left the account, and getting it wrong in
+     either direction is a wrong balance.
+  2. The **timezone of `applyTime` / `completeTime` is not stated**. They arrive as
+     `"2019-10-12 11:12:02"`, not as epoch milliseconds like every other endpoint. An eight
+     hour error would corrupt the canonical order (L7) and every time-windowed
+     reconciliation.
+
+  Deposits have neither problem: their status list is published in full and `insertTime` is
+  epoch milliseconds, so `NormalizeDeposit` exists and `NormalizeWithdrawal` does not.
+  Encoding a remembered enum into append-only financial rows is exactly what `CLAUDE.md` §2
+  forbids. If this is ever settled, note that `raw` is stored verbatim (L15), so the fix is
+  a replay rather than a migration.
 - The complete `incomeType` enum. Eight were listed on the page read
   (`TRANSFER`, `WELCOME_BONUS`, `REALIZED_PNL`, `FUNDING_FEE`, `COMMISSION`,
   `INSURANCE_CLEAR`, `REFERRAL_KICKBACK`, `COMMISSION_REBATE`) and "14 additional types"

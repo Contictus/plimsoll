@@ -311,3 +311,91 @@ func TestZeroAndNegativeWeightAreRejected(t *testing.T) {
 	require.ErrorIs(t, l.Acquire(ctx, uuid.New(), PriorityRealtime, 0), ErrInvalidWeight)
 	require.ErrorIs(t, l.Acquire(ctx, uuid.New(), PriorityRealtime, -5), ErrInvalidWeight)
 }
+
+// The exchange's used-weight counter is authoritative; our bucket only models it. They
+// drift whenever something we do not control spends the same IP budget -- another process,
+// a weight we have tabled wrong, a retry we did not count. Observe closes the gap in the
+// safe direction only: it can take tokens away, never hand them back, because trusting a
+// low count from the exchange would be the one mistake that ends in a three-day ban.
+func TestObserveDrainsTheSharedBudgetToMatchTheExchange(t *testing.T) {
+	clock := newFakeClock()
+	l, err := New(Config{SharedPerMinute: perMinute, PerIntegrationPerMinute: perMinute}, clock)
+	require.NoError(t, err)
+
+	integrationID := uuid.New()
+	// The exchange says almost the whole minute's budget is already spent, while our
+	// bucket still believes it is full.
+	l.Observe(perMinute - 1)
+
+	require.NoError(t, l.Acquire(context.Background(), integrationID, PriorityRealtime, 1),
+		"the one remaining weight unit must still be spendable")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- l.Acquire(context.Background(), integrationID, PriorityRealtime, 1)
+	}()
+	waitUntilWaiting(t, l, 1)
+	requireStillWaiting(t, errCh)
+
+	advanceOneToken(clock)
+	requireServed(t, errCh)
+}
+
+// A count lower than our own must not top the bucket up. The exchange reports a rolling
+// window and we may have spent weight it has not counted yet; refilling on its say-so
+// would let a burst through exactly when we are closest to the ceiling.
+func TestObserveNeverAddsTokens(t *testing.T) {
+	clock := newFakeClock()
+	l, err := New(Config{SharedPerMinute: perMinute, PerIntegrationPerMinute: perMinute}, clock)
+	require.NoError(t, err)
+
+	integrationID := uuid.New()
+	require.NoError(t, l.Acquire(context.Background(), integrationID, PriorityRealtime, perMinute))
+
+	// The exchange claims nothing has been spent. Our bucket is empty and must stay empty.
+	l.Observe(0)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- l.Acquire(context.Background(), integrationID, PriorityRealtime, 1)
+	}()
+	waitUntilWaiting(t, l, 1)
+	requireStillWaiting(t, errCh)
+
+	advanceOneToken(clock)
+	requireServed(t, errCh)
+}
+
+// A negative counter is not a reading, it is a broken response. Acting on it would be
+// arithmetic that quietly grants more budget than the ceiling allows.
+func TestObserveIgnoresNegativeCounts(t *testing.T) {
+	clock := newFakeClock()
+	l, err := New(Config{SharedPerMinute: perMinute, PerIntegrationPerMinute: perMinute}, clock)
+	require.NoError(t, err)
+
+	l.Observe(-5)
+
+	require.NoError(t, l.Acquire(context.Background(), uuid.New(), PriorityRealtime, 1),
+		"a negative count must leave the budget untouched")
+}
+
+// A count above the whole ceiling is not nonsense to be discarded -- it means the ceiling
+// we read from exchangeInfo is lower than the one being enforced, and we are already over
+// it. The only safe reading is that nothing is left.
+func TestObserveOverTheCeilingEmptiesTheBudget(t *testing.T) {
+	clock := newFakeClock()
+	l, err := New(Config{SharedPerMinute: perMinute, PerIntegrationPerMinute: perMinute}, clock)
+	require.NoError(t, err)
+
+	l.Observe(perMinute * 100)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- l.Acquire(context.Background(), uuid.New(), PriorityRealtime, 1)
+	}()
+	waitUntilWaiting(t, l, 1)
+	requireStillWaiting(t, errCh)
+
+	advanceOneToken(clock)
+	requireServed(t, errCh)
+}

@@ -47,6 +47,7 @@ func (e Event) insertParams() store.InsertLedgerEventParams {
 		Source:        e.Source,
 		EventType:     string(e.EventType),
 		InstrumentID:  e.InstrumentID,
+		AssetID:       e.AssetID,
 		StrategyID:    e.StrategyID,
 		Side:          optionalText(string(e.Side)),
 		Quantity:      e.Quantity,

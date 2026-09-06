@@ -227,6 +227,46 @@ func (l *Limiter) PenalizedUntil() time.Time {
 	return time.Time{}
 }
 
+// Observe applies the exchange's own used-weight counter to the shared budget. Binance
+// counts per IP and its number is the one that matters; ours is a model of it that drifts
+// whenever something outside this limiter spends the same budget.
+//
+// It only ever removes tokens. A count lower than our own is not evidence that budget is
+// available -- the exchange reports a rolling window and may not yet have counted a
+// request already in flight -- so trusting it would let a burst through at exactly the
+// moment we are closest to the ceiling. Refusing to refill is free; being wrong the other
+// way is a ban of up to three days (K24).
+func (l *Limiter) Observe(usedWeight int) {
+	if usedWeight < 0 {
+		// Not a reading. A malformed header must not become arithmetic.
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.clock.Now()
+	// A count above the ceiling means the enforced ceiling is higher than the one we read
+	// from exchangeInfo and we are already past it; remaining is then zero, not negative.
+	remaining := float64(l.cfg.SharedPerMinute - usedWeight)
+	if remaining < 0 {
+		remaining = 0
+	}
+	drain := int(l.shared.TokensAt(now) - remaining)
+	if drain <= 0 {
+		return
+	}
+	if drain > l.cfg.SharedPerMinute {
+		// ReserveN refuses anything larger than the burst, and the burst is the whole
+		// budget, so there is never more than this to take.
+		drain = l.cfg.SharedPerMinute
+	}
+	if r := l.shared.ReserveN(now, drain); !r.OK() {
+		return
+	}
+	// The tokens are deliberately kept rather than cancelled: taking them is the point.
+	l.notify()
+}
+
 // Waiting is how many callers are queued. Useful as a signal that backfill is starving
 // behind realtime, and it is the synchronisation point the tests rely on.
 func (l *Limiter) Waiting() int {

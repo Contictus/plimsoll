@@ -63,8 +63,13 @@ type Event struct {
 
 	EventType    EventType
 	InstrumentID *int64
-	StrategyID   *uuid.UUID
-	Side         Side
+
+	// AssetID names what moved, for the events that move one asset rather than trade a
+	// pair. A trade leaves it nil: its instrument already names both legs, and a second
+	// copy here would be a second place for them to disagree (00012).
+	AssetID    *int64
+	StrategyID *uuid.UUID
+	Side       Side
 
 	Quantity decimal.NullDecimal
 	Price    decimal.NullDecimal

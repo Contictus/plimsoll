@@ -91,9 +91,13 @@ func at(offset time.Duration) time.Time {
 	return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC).Add(offset)
 }
 
-// deposit is the minimal storable event: no instrument, no price, no side.
-func deposit(accountID, integrationID uuid.UUID, venueEventID string, seq int64, when time.Time) ledger.Event {
+// deposit is the minimal storable event: no instrument, no price, no side. It does name an
+// asset, because a balance event that does not say what moved cannot be folded (L3).
+func deposit(t *testing.T, accountID, integrationID uuid.UUID, venueEventID string, seq int64, when time.Time) ledger.Event {
+	t.Helper()
+	assetID := seedAsset(t)
 	return ledger.Event{
+		AssetID: &assetID,
 		AccountID:     accountID,
 		IntegrationID: integrationID,
 		VenueEventID:  venueEventID,
@@ -115,7 +119,7 @@ func deposit(accountID, integrationID uuid.UUID, venueEventID string, seq int64,
 func TestTheSameEventFromTwoSourcesIsStoredOnce(t *testing.T) {
 	accountID, integrationID := seedIntegration(t)
 
-	seenFirstByREST := deposit(accountID, integrationID, "spot:deposit:1", 1, at(0))
+	seenFirstByREST := deposit(t, accountID, integrationID, "spot:deposit:1", 1, at(0))
 	seenLaterByWS := seenFirstByREST
 	seenLaterByWS.Source = "ws"
 	seenLaterByWS.Raw = json.RawMessage(`{"probe":"deposit","via":"ws"}`)
@@ -144,10 +148,10 @@ func TestCanonicalOrderBreaksTiesBySequenceThenVenueEventID(t *testing.T) {
 	accountID, integrationID := seedIntegration(t)
 	tied := at(0)
 
-	later := deposit(accountID, integrationID, "spot:deposit:later", 1, at(time.Second))
-	seqThree := deposit(accountID, integrationID, "spot:deposit:c", 3, tied)
-	tiedB := deposit(accountID, integrationID, "spot:deposit:b", 1, tied)
-	tiedA := deposit(accountID, integrationID, "spot:deposit:a", 1, tied)
+	later := deposit(t, accountID, integrationID, "spot:deposit:later", 1, at(time.Second))
+	seqThree := deposit(t, accountID, integrationID, "spot:deposit:c", 3, tied)
+	tiedB := deposit(t, accountID, integrationID, "spot:deposit:b", 1, tied)
+	tiedA := deposit(t, accountID, integrationID, "spot:deposit:a", 1, tied)
 
 	inserted, err := appendAs(t, accountID, seqThree, later, tiedB, tiedA)
 	require.NoError(t, err)
@@ -171,7 +175,7 @@ func TestCanonicalOrderBreaksTiesBySequenceThenVenueEventID(t *testing.T) {
 func TestAnEventCannotBeStoredWithoutItsRawPayload(t *testing.T) {
 	accountID, integrationID := seedIntegration(t)
 
-	naked := deposit(accountID, integrationID, "spot:deposit:naked", 1, at(0))
+	naked := deposit(t, accountID, integrationID, "spot:deposit:naked", 1, at(0))
 	naked.Raw = nil
 
 	_, err := appendAs(t, accountID, naked)
@@ -188,7 +192,7 @@ func TestTheAppRoleCannotUpdateOrDeleteALedgerEvent(t *testing.T) {
 	ctx := context.Background()
 	accountID, integrationID := seedIntegration(t)
 
-	inserted, err := appendAs(t, accountID, deposit(accountID, integrationID, "spot:deposit:frozen", 1, at(0)))
+	inserted, err := appendAs(t, accountID, deposit(t, accountID, integrationID, "spot:deposit:frozen", 1, at(0)))
 	require.NoError(t, err)
 	require.Equal(t, 1, inserted)
 
@@ -225,14 +229,14 @@ func TestAnEventCannotBeAttachedToAnotherAccountsIntegration(t *testing.T) {
 
 	// Right account_id (so RLS is satisfied), another account's integration. Only the
 	// composite FK can catch this one -- referential checks bypass RLS by design.
-	crossFK := deposit(accountA, integrationB, "spot:deposit:cross-fk", 1, at(0))
+	crossFK := deposit(t, accountA, integrationB, "spot:deposit:cross-fk", 1, at(0))
 	_, err := appendAs(t, accountA, crossFK)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ledger_integration_belongs_to_account")
 
 	// Another account's pair entirely, written from account A's session. RLS refuses the
 	// row before the FK is ever consulted.
-	stolen := deposit(accountB, integrationB, "spot:deposit:cross-rls", 1, at(0))
+	stolen := deposit(t, accountB, integrationB, "spot:deposit:cross-rls", 1, at(0))
 	_, err = appendAs(t, accountA, stolen)
 	require.ErrorContains(t, err, "row-level security")
 
@@ -245,7 +249,7 @@ func TestOneAccountCannotStreamAnothersLedger(t *testing.T) {
 	accountA, integrationA := seedIntegration(t)
 	accountB, _ := seedIntegration(t)
 
-	_, err := appendAs(t, accountA, deposit(accountA, integrationA, "spot:deposit:private", 1, at(0)))
+	_, err := appendAs(t, accountA, deposit(t, accountA, integrationA, "spot:deposit:private", 1, at(0)))
 	require.NoError(t, err)
 
 	require.Len(t, streamAs(t, accountA, integrationA), 1)
@@ -292,7 +296,7 @@ func TestATradeKeepsEveryDigitThroughTheLedger(t *testing.T) {
 	price := decimal.RequireFromString("12345678901234567890.123456789012345678")
 	fee := decimal.RequireFromString("0.000750000000000001")
 
-	trade := deposit(accountID, integrationID, "usdm:trade:BTCUSDT:99", 99, at(0))
+	trade := deposit(t, accountID, integrationID, "usdm:trade:BTCUSDT:99", 99, at(0))
 	trade.EventType = ledger.TypeTrade
 	trade.InstrumentID = &instrumentID
 	trade.Side = ledger.SideBuy
@@ -327,10 +331,10 @@ func TestStreamPagesForwardWithoutSkippingOrRepeating(t *testing.T) {
 	// Two events share a timestamp and a sequence, so paging has to carry all three parts
 	// of the cursor to make progress at all.
 	batch := []ledger.Event{
-		deposit(accountID, integrationID, "spot:deposit:p1", 1, tied),
-		deposit(accountID, integrationID, "spot:deposit:p2", 1, tied),
-		deposit(accountID, integrationID, "spot:deposit:p3", 2, tied),
-		deposit(accountID, integrationID, "spot:deposit:p4", 3, at(time.Second)),
+		deposit(t, accountID, integrationID, "spot:deposit:p1", 1, tied),
+		deposit(t, accountID, integrationID, "spot:deposit:p2", 1, tied),
+		deposit(t, accountID, integrationID, "spot:deposit:p3", 2, tied),
+		deposit(t, accountID, integrationID, "spot:deposit:p4", 3, at(time.Second)),
 	}
 	inserted, err := appendAs(t, accountID, batch...)
 	require.NoError(t, err)
@@ -370,7 +374,7 @@ func TestStreamPagesForwardWithoutSkippingOrRepeating(t *testing.T) {
 func TestAnEventTypeWithNoFoldRuleCannotBeStored(t *testing.T) {
 	accountID, integrationID := seedIntegration(t)
 
-	adjustment := deposit(accountID, integrationID, "usdm:adl:1", 1, at(0))
+	adjustment := deposit(t, accountID, integrationID, "usdm:adl:1", 1, at(0))
 	adjustment.EventType = ledger.TypePositionAdjustment
 
 	_, err := appendAs(t, accountID, adjustment)
@@ -390,7 +394,7 @@ func TestAValueCarryingEventMustNameItsInstrument(t *testing.T) {
 		ledger.TypeFee, ledger.TypeCommissionRebate, ledger.TypeFundingPayment,
 	} {
 		t.Run(string(eventType), func(t *testing.T) {
-			e := deposit(accountID, integrationID, "usdm:income:"+string(eventType)+":1", 1, at(0))
+			e := deposit(t, accountID, integrationID, "usdm:income:"+string(eventType)+":1", 1, at(0))
 			e.EventType = eventType
 			e.Fee = decimal.NewNullDecimal(decimal.RequireFromString("0.5"))
 			e.FeeAsset = "USDT"
@@ -403,6 +407,76 @@ func TestAValueCarryingEventMustNameItsInstrument(t *testing.T) {
 
 	// A balance event genuinely has no instrument, and must still be storable.
 	_, err := appendAs(t, accountID,
-		deposit(accountID, integrationID, "spot:deposit:balance", 2, at(time.Second)))
+		deposit(t, accountID, integrationID, "spot:deposit:balance", 2, at(time.Second)))
 	require.NoError(t, err)
+}
+
+// seedAsset inserts a canonical asset as the owner. The registry is reference data with no
+// RLS and no write grant for the app role (00004), so this is the only way to create one.
+func seedAsset(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	require.NoError(t, ownerPool(t).QueryRow(context.Background(),
+		`INSERT INTO assets (canonical_symbol, kind) VALUES ($1, 'native') RETURNING id`,
+		"PROBE"+uuid.NewString()[:8],
+	).Scan(&id))
+	return id
+}
+
+// A deposit says how much moved. Without an asset it does not say what moved, and a
+// projection folding it would have to reach into raw JSONB to find out -- which is the
+// normalizer's job, and would make raw a data source instead of insurance (L3, L15).
+func TestABalanceEventMustNameItsAsset(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	orphan := deposit(t, accountID, integrationID, "spot:deposit:no-asset", 0, at(0))
+	orphan.AssetID = nil
+
+	_, err := appendAs(t, accountID, orphan)
+	require.Error(t, err, "a deposit with no asset must be refused at write time")
+	require.Contains(t, err.Error(), "balance_events_name_their_asset")
+}
+
+// A trade keeps its NULL. The instrument already names both assets, and a second copy here
+// would be a second place for them to disagree.
+func TestATradeDoesNotNameAnAsset(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+
+	trade := deposit(t, accountID, integrationID, "spot:trade:PROBE:1", 1, at(time.Second))
+	trade.EventType = ledger.TypeTrade
+	trade.InstrumentID = &instrumentID
+	trade.AssetID = nil
+	trade.Side = ledger.SideBuy
+	trade.Price = decimal.NewNullDecimal(decimal.RequireFromString("2"))
+
+	inserted, err := appendAs(t, accountID, trade)
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted)
+}
+
+// The asset has to survive the round trip, not merely pass the constraint on the way in.
+func TestAssetSurvivesTheRoundTrip(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	assetID := seedAsset(t)
+
+	event := deposit(t, accountID, integrationID, "spot:deposit:"+uuid.NewString(), 0, at(0))
+	event.AssetID = &assetID
+
+	inserted, err := appendAs(t, accountID, event)
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted)
+
+	got := streamAs(t, accountID, integrationID)
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].AssetID, "asset_id came back nil")
+	require.Equal(t, assetID, *got[0].AssetID)
+}
+
+// The app role reads the registry and cannot write it (00004). A bug in the ingest path
+// must not be able to invent an asset so that an unknown symbol resolves.
+func TestTheAppRoleCannotCreateAnAsset(t *testing.T) {
+	_, err := appPool(t).Exec(context.Background(),
+		`INSERT INTO assets (canonical_symbol, kind) VALUES ('INVENTED', 'native')`)
+	require.Error(t, err, "the ingest path must not be able to invent an asset")
 }

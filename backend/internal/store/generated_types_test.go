@@ -7,7 +7,11 @@ import (
 	"testing"
 )
 
-// L1: money never crosses as float64. sqlc emits float64 for numeric unless the override
+// L1: money never crosses as float64.
+//
+// The scan is over the whole file, comments included, and stays that way: a guard that
+// parsed Go to exempt comments would be a guard with a bug in it. If this fires on a
+// comment, reword the comment -- the answer is never to narrow the scan. sqlc emits float64 for numeric unless the override
 // is configured, so this asserts the override is live rather than merely written down.
 // It runs as a unit test, with no Docker, so a regression is caught on every save.
 func TestGeneratedCodeContainsNoFloat64(t *testing.T) {

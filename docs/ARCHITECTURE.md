@@ -274,6 +274,7 @@ Replaces the boolean `stale` (K23, L11). It is API surface, not diagnostics:
 | `ws_gap` | missed keepalive, disconnect, sequence hole |
 | `price_stale` | mark price older than tolerance |
 | `backfill_incomplete` | staged backfill still running (K26) |
+| `history_truncated` | the venue will not return data before a cutoff -- permanent, unlike `backfill_incomplete` |
 | `assumed_peg` | a price path fell back to 1.00 (K17) |
 | `unknown_symbol` | alias resolution failed (K22) |
 | `reconciliation_mismatch` | an open finding above tolerance |

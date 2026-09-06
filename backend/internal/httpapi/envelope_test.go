@@ -60,3 +60,36 @@ func TestFreshnessKeepsEveryReason(t *testing.T) {
 	}
 	require.Equal(t, in, httpapi.NewFreshness(in...).Reasons)
 }
+
+// history_truncated is not backfill_incomplete, and the difference is the whole reason it
+// exists. "Incomplete" means not finished yet: recoverable, and it implies that waiting
+// will fix it. A venue that will never return data before a cutoff is a different and
+// permanent claim, and telling a user to wait for something that will not arrive is exactly
+// the confident-and-wrong failure L11 rejects.
+func TestHistoryTruncatedIsItsOwnReason(t *testing.T) {
+	require.Equal(t, "history_truncated", httpapi.ReasonHistoryTruncated)
+	require.NotEqual(t, httpapi.ReasonBackfillIncomplete, httpapi.ReasonHistoryTruncated)
+}
+
+// The reason codes are a closed set (ARCHITECTURE.md §5). Asserted as a whole rather than
+// one by one, so a code added to the package without being added to the documented contract
+// fails here instead of appearing in a response no client can match on.
+func TestTheReasonSetIsClosedAndDistinct(t *testing.T) {
+	codes := []string{
+		httpapi.ReasonWSGap,
+		httpapi.ReasonPriceStale,
+		httpapi.ReasonBackfillIncomplete,
+		httpapi.ReasonHistoryTruncated,
+		httpapi.ReasonAssumedPeg,
+		httpapi.ReasonUnknownSymbol,
+		httpapi.ReasonReconciliationMismatch,
+		httpapi.ReasonFeePriceMissing,
+	}
+	seen := map[string]bool{}
+	for _, code := range codes {
+		require.NotEmpty(t, code)
+		require.False(t, seen[code], "duplicate reason code %q", code)
+		seen[code] = true
+	}
+	require.Len(t, seen, 8)
+}

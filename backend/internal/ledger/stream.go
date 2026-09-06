@@ -58,6 +58,7 @@ func eventFromRow(r store.LedgerEvent) Event {
 		Source:        r.Source,
 		EventType:     EventType(r.EventType),
 		InstrumentID:  r.InstrumentID,
+		AssetID:       r.AssetID,
 		StrategyID:    r.StrategyID,
 		Side:          Side(text(r.Side)),
 		Quantity:      r.Quantity,
