@@ -116,3 +116,10 @@ func New(reasons ...Reason) Report {
 	}
 	return out
 }
+
+// ReasonLineageMismatch means replaying a position's events did not reproduce the stored
+// projection, on the same last event. It is the one reason in this set that accuses the
+// system itself rather than the venue or the network, and it is an error without
+// qualification: the whole product claim is that the numbers are right and we can prove it,
+// so a proof that comes out different is the most serious thing an API can report.
+const ReasonLineageMismatch = "lineage_mismatch"

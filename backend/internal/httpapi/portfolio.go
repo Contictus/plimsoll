@@ -10,6 +10,7 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // Every money field below is a string, declared as one rather than converted at the edge by
@@ -201,4 +202,14 @@ func (d Deps) registerPortfolio(api huma.API) {
 			Position: renderPosition(h),
 		}}, nil
 	})
+}
+
+// nullText renders an optional money value. An absent one is "" rather than "0": a missing
+// price and a price of zero are different claims, and collapsing them is how a deposit
+// acquires a cost basis (L1).
+func nullText(d decimal.NullDecimal) string {
+	if !d.Valid {
+		return ""
+	}
+	return d.Decimal.String()
 }

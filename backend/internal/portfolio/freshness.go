@@ -9,9 +9,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// ReasonsFor turns what is known about an account's ingestion into the reasons its response
-// must carry. Pure, and separate from the loader, because the ranking of these conditions is
-// a product decision that deserves tests of its own rather than a database (L4, L11).
+// ValuationUnavailable is what a response carrying numbers says while M4 does not exist:
+// there is no total, only subtotals per quote asset. A response that merely omitted the
+// total would leave a client to guess whether the account is empty or nothing was priced.
+//
+// Only responses that would otherwise carry a total raise it. A ledger listing values
+// nothing, and adding it there would be noise -- and noise in freshness erodes it exactly
+// as fast as silence does.
+func ValuationUnavailable(now time.Time) freshness.Reason {
+	return freshness.Reason{
+		Code:     freshness.ReasonValuationUnavailable,
+		Severity: freshness.SeverityWarn,
+		Detail: "no price source has run: totals are subtotals per quote asset, and nothing" +
+			" here is marked to market",
+		Since: now,
+	}
+}
+
+// ReasonsFor turns what is known about an account's ingestion into the reasons any response
+// built on it must carry. Pure, and separate from the loader, because the ranking of these
+// conditions is a product decision that deserves tests of its own rather than a database
+// (L4, L11).
 //
 // About Since: it is when the condition is known to have started. Where that is knowable it
 // is used -- the state's own timestamp, or when a silent worker last spoke. Where it is not,
@@ -23,16 +41,7 @@ func ReasonsFor(
 	now time.Time,
 	leaseTTL time.Duration,
 ) []freshness.Reason {
-	// Always first, and always present until M4: there is no total in this response, and a
-	// response that merely omitted one would leave a client to guess whether the account
-	// holds nothing or nothing was priced.
-	reasons := []freshness.Reason{{
-		Code:     freshness.ReasonValuationUnavailable,
-		Severity: freshness.SeverityWarn,
-		Detail: "no price source has run: totals are subtotals per quote asset, and nothing" +
-			" here is marked to market",
-		Since: now,
-	}}
+	reasons := make([]freshness.Reason, 0, len(statuses)+1)
 
 	for _, s := range statuses {
 		name := fmt.Sprintf("%s %s", s.Exchange, s.Label)

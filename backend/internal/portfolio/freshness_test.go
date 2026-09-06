@@ -44,14 +44,25 @@ func live(id uuid.UUID, at time.Time) ingest.Status {
 //
 // Warn, not error: the subtotals present are exact. Marking an exact response unreliable
 // erodes what status means as surely as failing to mark a wrong one.
-func TestValuationUnavailableIsAlwaysPresentAndOnlyDegrades(t *testing.T) {
+func TestValuationUnavailableOnlyDegrades(t *testing.T) {
 	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
-	reasons := portfolio.ReasonsFor(nil, nil, now, testLeaseTTL)
+	reason := portfolio.ValuationUnavailable(now)
 
-	require.Equal(t, []string{freshness.ReasonValuationUnavailable}, codes(reasons))
-	require.Equal(t, freshness.SeverityWarn,
-		reasonWith(t, reasons, freshness.ReasonValuationUnavailable).Severity)
-	require.Equal(t, freshness.StatusDegraded, freshness.New(reasons...).Status)
+	require.Equal(t, freshness.ReasonValuationUnavailable, reason.Code)
+	require.Equal(t, freshness.SeverityWarn, reason.Severity)
+	require.Equal(t, freshness.StatusDegraded, freshness.New(reason).Status)
+}
+
+// It is raised by the responses that would otherwise carry a total, and not by the
+// ingestion reasons -- a ledger listing values nothing, and a reason it cannot act on is
+// noise. Noise in freshness erodes it exactly as fast as silence does.
+func TestIngestionReasonsSayNothingAboutValuation(t *testing.T) {
+	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
+
+	require.Empty(t, portfolio.ReasonsFor(nil, nil, now, testLeaseTTL))
+	require.NotContains(t,
+		codes(portfolio.ReasonsFor([]ingest.Status{live(uuid.New(), now)}, nil, now, testLeaseTTL)),
+		freshness.ReasonValuationUnavailable)
 }
 
 // An integration nobody has ever reported on is not "connecting". It is an integration
@@ -70,6 +81,7 @@ func TestAnIntegrationWithNoWorkerIsReportedAsStalled(t *testing.T) {
 	require.Equal(t, freshness.SeverityError, stalled.Severity)
 	require.Contains(t, stalled.Detail, "main")
 	require.Equal(t, freshness.StatusUnreliable, freshness.New(reasons...).Status)
+	require.Len(t, reasons, 1)
 }
 
 // A worker that stopped saying anything is worse than any state it named. "Live, as of
@@ -109,7 +121,7 @@ func TestALiveWorkerAddsNoReasonOfItsOwn(t *testing.T) {
 	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
 	reasons := portfolio.ReasonsFor([]ingest.Status{live(uuid.New(), now)}, nil, now, testLeaseTTL)
 
-	require.Equal(t, []string{freshness.ReasonValuationUnavailable}, codes(reasons))
+	require.Empty(t, codes(reasons))
 }
 
 // A worker that is running and says its feed is down contributes its own state's reason.
