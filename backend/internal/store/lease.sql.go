@@ -99,6 +99,32 @@ func (q *Queries) HeartbeatIntegrationLease(ctx context.Context, arg HeartbeatIn
 	return expires_at, err
 }
 
+const leaseIsHeldBy = `-- name: LeaseIsHeldBy :one
+SELECT EXISTS (
+  SELECT 1 FROM integration_leases
+  WHERE account_id = $1
+    AND integration_id = $2
+    AND owner_id = $3
+    AND expires_at > now()
+)
+`
+
+type LeaseIsHeldByParams struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	OwnerID       string
+}
+
+// Read inside the same transaction as the write it guards. A worker that checked its lease
+// and then wrote in a second transaction would have a window between the two for the lease
+// to be lost in, and the whole point of a lease is that there is no such window.
+func (q *Queries) LeaseIsHeldBy(ctx context.Context, arg LeaseIsHeldByParams) (bool, error) {
+	row := q.db.QueryRow(ctx, leaseIsHeldBy, arg.AccountID, arg.IntegrationID, arg.OwnerID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const releaseIntegrationLease = `-- name: ReleaseIntegrationLease :execrows
 DELETE FROM integration_leases
 WHERE account_id = $1

@@ -47,3 +47,15 @@ DELETE FROM integration_leases
 WHERE account_id = sqlc.arg(account_id)
   AND integration_id = sqlc.arg(integration_id)
   AND owner_id = sqlc.arg(owner_id);
+
+-- name: LeaseIsHeldBy :one
+-- Read inside the same transaction as the write it guards. A worker that checked its lease
+-- and then wrote in a second transaction would have a window between the two for the lease
+-- to be lost in, and the whole point of a lease is that there is no such window.
+SELECT EXISTS (
+  SELECT 1 FROM integration_leases
+  WHERE account_id = sqlc.arg(account_id)
+    AND integration_id = sqlc.arg(integration_id)
+    AND owner_id = sqlc.arg(owner_id)
+    AND expires_at > now()
+);
