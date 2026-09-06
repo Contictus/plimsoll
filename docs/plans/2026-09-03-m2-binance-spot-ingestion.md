@@ -363,14 +363,16 @@ quietly broken.
 ## Task 6: Discovery and the resumable backfill
 
 **Files:**
-- Create: `backend/migrations/00009_backfill_progress.sql`
-- Create: `backend/internal/backfill/discover.go`, `walk.go`
-- Test: `backend/internal/backfill/backfill_integration_test.go`
+- Create: `backend/migrations/00013_backfill_progress.sql`
+- Create: `backend/internal/backfill/progress.go`, `discover.go`, `trades.go`, `deposits.go`
+- Test: `backend/internal/backfill/{setup,fake,trades,discover,deposits}_*_test.go`
 
 **Consumes:** tasks 3–5.
 **Produces:**
-- `backfill.Discover(ctx, c *binance.Client, integrationID) ([]string, error)`
-- `backfill.Walk(ctx, deps, accountID, integrationID, symbol string) error`
+- `backfill.Discover(ctx, d Deps, t Target, symbols []string) ([]string, error)`
+- `backfill.WalkTrades(ctx, d Deps, t Target, symbol string) error`
+- `backfill.WalkDeposits(ctx, d Deps, t Target, since time.Time) error`
+- `binance.SpotSymbols(raw) ([]string, error)` -- the list the sweep probes
 - `backfill.Progress{Scope string, Cursor string, CompletedAt *time.Time}`
 
 **Why this task is shaped the way it is (F4).** There is no endpoint that returns spot
@@ -385,12 +387,12 @@ thousand symbols at weight 20 is 40–60k weight: under ten minutes of a dedicat
 once per integration, at backfill priority where it cannot starve anyone's live stream. It
 is not clever, and it is the only version with no hole in it.
 
-- [ ] **Step 1: Write the migration.** `backfill_progress (account_id, integration_id,
+- [x] **Step 1: Write the migration.** `backfill_progress (account_id, integration_id,
       scope, cursor, completed_at, updated_at)`, PK `(integration_id, scope)`. `scope` is
       `discover` or `trades:<symbol>` or `deposits` or `withdrawals`. Tenant table: RLS
       enabled and forced, `account_id` on the row (L12).
 
-- [ ] **Step 2: Write the failing integration tests.**
+- [x] **Step 2: Write the failing integration tests.**
       - **resume:** walk a symbol, kill it halfway (return a context error after N pages),
         walk again — every trade lands exactly once and none is skipped. This is the M2
         exit criterion "backfill resumes after interruption"
@@ -410,9 +412,9 @@ is not clever, and it is the only version with no hole in it.
         `backfill_incomplete`, not report a complete history. This is the test that stands
         in for the verification we cannot run
 
-- [ ] **Step 3: Run and watch them fail.**
+- [x] **Step 3: Run and watch them fail.**
 
-- [ ] **Step 4: Implement.** Trades walk by `fromId`, one weight-20 request per 1000
+- [x] **Step 4: Implement.** Trades walk by `fromId`, one weight-20 request per 1000
       trades, cursor = last trade id seen. **F5 is checked at runtime, not assumed**
       (amended 2026-09-04, see `BINANCE-API-NOTES.md` §5): no real key exists to settle
       whether `fromId=0` returns the oldest trades, so the walk verifies that each page
@@ -423,11 +425,24 @@ is not clever, and it is the only version with no hole in it.
       `tenancy.InTx`, and the cursor advances **in the same transaction as the events it
       describes** — otherwise a crash between the two either loses events or replays them.
 
-- [ ] **Step 5: Mutation-test.** Advance the cursor in its own transaction; make the cursor
+- [x] **Step 5: Mutation-test.** Advance the cursor in its own transaction; make the cursor
       global rather than per scope; skip the probe-complete record; drop the page-contiguity
       check. Each must fail a test.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
+
+> **Amended 2026-09-04, on implementation.** Two things this task planned are not in it,
+> both deliberately:
+>
+> - **No withdrawal walk.** `NormalizeWithdrawal` does not exist -- the withdraw status enum
+>   and the timezone of `applyTime` are both undocumented (`BINANCE-API-NOTES.md` section 5)
+>   -- so a walk would have nowhere to put what it read. The `withdrawals` scope name is
+>   reserved in `00013` so that adding the walk later is code, not a migration.
+> - **Discovery has a residual hole and says so.** `exchangeInfo` names only currently
+>   listed symbols, so a pair delisted before the sweep cannot be probed. The sweep is
+>   complete with respect to the list Binance will give us, not with respect to the account.
+>   Recorded in `BINANCE-API-NOTES.md` section 5 and in `discover.go`; it belongs in
+>   `freshness` (L11), which task 8 wires.
 
 ---
 
