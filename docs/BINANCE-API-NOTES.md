@@ -177,18 +177,56 @@ will not notice until the ban.
 
 ## 4. Read-only key verification (K9, L13)
 
-`GET /sapi/v1/account/apiRestrictions` returns, among others:
+> **Corrected 2026-09-03** while writing M2 task 2. The earlier version of this section
+> listed six fields and asserted that `enableFutures` is a read permission. Both were
+> wrong: the documented response carries **thirteen** fields, and the page states no
+> semantics for any of them. The paragraph below replaces it.
 
-```
-ipRestrict, createTime, enableReading, enableWithdrawals,
-enableSpotAndMarginTrading, enableFutures
+`GET /sapi/v1/account/apiRestrictions` — weight 1 (IP), requires the `X-MBX-APIKEY` header
+and a `timestamp`; `recvWindow` is optional and capped at 60000. The response example given
+on the page, verbatim and complete:
+
+```json
+{
+  "ipRestrict": false,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": true,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": true,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": true
+}
 ```
 
-The rule stays what K9 says: an over-permissioned key is **rejected**, not accepted with a
-warning. `enableWithdrawals` or any trading permission set means refuse the connection and
-tell the user which permission to remove. Note that reading futures data requires
-`enableFutures`, which is a read permission here and not a trading one — verify that
-distinction against the response before writing the check.
+**The page documents no meaning for any field.** Neither does the account-management FAQ,
+which says only that permissions beyond reading should not be enabled without an IP
+restriction, and that withdrawals require one. So the semantics of `enableFutures`,
+`enableInternalTransfer` and `permitsUniversalTransfer` are **not** verified, and the
+previous claim that `enableFutures` is a read permission had no source behind it.
+
+That unresolved question decides the rule rather than blocking it. K9 says an
+over-permissioned key is rejected, and under uncertainty the safe reading of "permission"
+is the broad one. So `integration.Verify` **allows only a known list of read permissions to
+be true** — `enableReading` and `enableFixReadOnly` — and rejects every other boolean that
+is true, named or not. A field Binance adds next year is rejected by default, which is the
+only version of this check that cannot silently start accepting a trading key.
+
+Three fields are explicitly **not** capabilities and never cause a rejection: `createTime`
+(a timestamp), `tradingAuthorityExpirationTime` (a timestamp; absent from the example but
+documented elsewhere), and `ipRestrict` — which is a *restriction*, so `true` is the safer
+key and rejecting it would be exactly backwards.
+
+The cost of the broad reading is that a user whose key also has futures enabled is asked to
+issue a separate key for us. That is the correct trade in M2, which is spot-only. **M5 must
+resolve `enableFutures` against a real response before it can read futures data**, and if it
+turns out to permit order placement then it stays rejected and futures reading needs a
+different answer.
 
 ## 5. What is still unverified
 
@@ -196,6 +234,11 @@ Recorded so the M2 plan does not quietly assume them:
 
 - The exact spot `REQUEST_WEIGHT` ceiling per minute — read from `exchangeInfo` instead.
 - Whether spot trade history has a depth limit comparable to the futures three months.
+- Whether `enableFutures` grants futures **trading** or only futures **reading**. Neither
+  the API-key-permission page nor the account FAQ says. M2 rejects it either way; M5
+  cannot proceed on futures without an answer. See §4.
+- Whether `enableInternalTransfer` and `permitsUniversalTransfer` can move funds off the
+  account or only between the user's own wallets. Rejected either way for the same reason.
 - The complete `incomeType` enum. Eight were listed on the page read
   (`TRANSFER`, `WELCOME_BONUS`, `REALIZED_PNL`, `FUNDING_FEE`, `COMMISSION`,
   `INSURANCE_CLEAR`, `REFERRAL_KICKBACK`, `COMMISSION_REBATE`) and "14 additional types"

@@ -1,0 +1,17 @@
+{
+  "_source": "derived",
+  "_why": "A key that can move funds off the account. A fixture for a case we must never accept is worth more than one for the happy path (K9).",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": true,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": false
+}

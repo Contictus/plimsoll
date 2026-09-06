@@ -1,0 +1,17 @@
+{
+  "_source": "derived",
+  "_why": "A key that can place spot orders. Trade execution is never implemented and never permitted (L13), so this is a rejection even though the key would otherwise work.",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": true,
+  "enablePortfolioMarginTrading": false
+}

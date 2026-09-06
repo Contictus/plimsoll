@@ -1,0 +1,18 @@
+{
+  "_source": "derived",
+  "_why": "A permission Binance has not shipped yet. Defaulting an unrecognized true to harmless is how a trading-capable key gets accepted a year from now, so the parser must reject it and name it.",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": false,
+  "enableQuantumSettlement": true
+}

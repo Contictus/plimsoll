@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
-	"github.com/Contictus/plimsoll/backend/internal/config"
+	"github.com/Contictus/plimsoll/backend/internal/crypto"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
 	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -54,7 +54,11 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := config.CheckMasterKEK(os.Getenv("PLIMSOLL_MASTER_KEK")); err != nil {
+	// Fail fast on the envelope master key (K25). Building the provider is the check:
+	// there is one implementation of "what a valid KEK looks like", so a process cannot
+	// boot here and then be unable to decrypt a single credential. Task 2 of M2 hands the
+	// provider to the connect flow; until then its construction is the whole value.
+	if _, err := crypto.NewEnvFileProvider(); err != nil {
 		return err
 	}
 

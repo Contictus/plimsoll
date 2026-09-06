@@ -46,6 +46,20 @@ linters:
             - pkg: "github.com/jackc/pgx/v5"
               desc: "engines are pure (L4): no database"
 
+        # The limiter decides when a call may go out; it never makes one. Keeping the
+        # network out of it is what lets the whole priority and penalty machinery be
+        # tested with an injected clock and no server (K24, L4).
+        ratelimit-decides-but-never-calls:
+          files:
+            - "**/internal/ratelimit/**"
+          deny:
+            - pkg: "net/http"
+              desc: "the limiter authorises a call, it does not make one"
+            - pkg: "github.com/jackc/pgx/v5"
+              desc: "the limiter holds no database"
+            - pkg: "log/slog"
+              desc: "the limiter has no logger; the caller reports what it did"
+
         # The ledger is the one module that both owns writes and is named by L4. It gets a
         # rule of its own rather than an exception to the engines rule: production code may
         # hold a transaction-scoped *store.Queries handed to it by tenancy.InTx, but never

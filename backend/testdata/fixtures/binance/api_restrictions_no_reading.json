@@ -1,0 +1,17 @@
+{
+  "_source": "derived",
+  "_why": "A key with every permission off, reading included. Not over-permissioned -- simply unable to do the job, and a different error for a different fix.",
+  "ipRestrict": true,
+  "createTime": 1623840271000,
+  "enableReading": false,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": false,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": false,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": false,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": false
+}

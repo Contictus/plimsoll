@@ -67,12 +67,16 @@ type InstrumentAlias struct {
 }
 
 type Integration struct {
-	ID        uuid.UUID
-	AccountID uuid.UUID
-	Exchange  string
-	Label     string
-	Status    string
-	CreatedAt time.Time
+	ID                   uuid.UUID
+	AccountID            uuid.UUID
+	Exchange             string
+	Label                string
+	Status               string
+	CreatedAt            time.Time
+	CredentialCiphertext []byte
+	WrappedDek           []byte
+	KeyVersion           *int32
+	CredentialVerifiedAt *time.Time
 }
 
 type Invite struct {

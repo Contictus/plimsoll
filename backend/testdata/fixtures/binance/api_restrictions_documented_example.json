@@ -1,0 +1,17 @@
+{
+  "_source": "documented",
+  "_why": "The response example exactly as the documentation prints it, values included. It is over-permissioned (internal transfer, universal transfer, portfolio margin) and must be rejected -- which is the point: the vendor's own illustration is not a key we would accept.",
+  "ipRestrict": false,
+  "createTime": 1623840271000,
+  "enableReading": true,
+  "enableWithdrawals": false,
+  "enableInternalTransfer": true,
+  "enableMargin": false,
+  "enableFutures": false,
+  "permitsUniversalTransfer": true,
+  "enableVanillaOptions": false,
+  "enableFixApiTrade": false,
+  "enableFixReadOnly": true,
+  "enableSpotAndMarginTrading": false,
+  "enablePortfolioMarginTrading": true
+}
