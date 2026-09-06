@@ -529,6 +529,61 @@ itself. Losing every row costs the reader its freshness detail and nothing else.
 
 ---
 
+### K40 — A portfolio with no price source has subtotals, not a total · `extends K11`
+
+M4 owns prices. M3 has none, so `GET /portfolio` reports what the fold produces without
+one: quantity, average entry, cost basis, realized PnL, fees.
+
+**No total field exists**, not even a null one. Realized PnL on BTC-USDT is denominated in
+USDT and on ETH-BTC in BTC; a field adding them holds a number with no unit, which is the
+"every screen shows a different total" failure in miniature. What is reported instead is a
+subtotal per quote asset, and the type is named `QuoteTotal` so no later caller mistakes it
+for the other thing.
+
+A missing field alone would be silence, and a client finding no total would reasonably
+guess the account is empty. So `valuation_unavailable` says why (L11). It is a **warning**,
+not an error: every number present is exact. Marking an exact response `unreliable` erodes
+what `status` means as surely as failing to mark a wrong one — and `status` is only worth
+reading if it has stayed honest in both directions.
+
+---
+
+### K41 — The ledger is paginated in canonical order, and the page is not final while a backfill runs
+
+ARCHITECTURE.md §10 originally said cursor pagination on `seq`, "stable because the ledger
+is append-only". Append-only is not enough. `seq` is assigned before commit, so a reader
+can pass a value still in flight and skip it permanently — the same hazard L6 forbids for
+projections, and it does not become safe because the reader is a person.
+
+So `GET /transactions` pages on `(event_time, venue_sequence, venue_event_id)`, the same
+keyset the fold reads in (L7). That fixes the in-flight hazard and does **not** fix the
+other one: a backfill inserts *behind* a cursor a reader has already passed. No ordering
+avoids that while history is still loading, because the rows genuinely arrive late.
+
+The honest answer is not a better cursor, it is saying so: a listing carries the same
+`backfill_incomplete` reason the portfolio does, and a client is told its page is a view of
+an incomplete set rather than a final one. `seq` stays in the response as lineage — it is
+what a support conversation quotes — and never as a cursor.
+
+---
+
+### K42 — A position's API id is its natural key · `extends L3`
+
+`positions` is a projection: it can be dropped and folded again to the same rows, and the
+rebuild-equality test requires exactly that. A `BIGSERIAL` id would come back different from
+every rebuild — breaking every link a user saved, every alert that named a position, and
+every id a support conversation quoted.
+
+The id is therefore `<integration_id>.<instrument_id>`: the key the projection is already
+stored under, which is identical before and after a rebuild by construction. The separator
+is a dot because neither half can contain one — a UUID is hex and hyphens, an instrument id
+is digits — so parsing is unambiguous without escaping.
+
+The cost is a longer, uglier id in a URL. That is the whole cost, and it buys an identifier
+that cannot silently start pointing at a different position.
+
+---
+
 ---
 
 ## Deliberately Out of Scope

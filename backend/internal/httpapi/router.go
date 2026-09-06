@@ -34,7 +34,18 @@ type Deps struct {
 	DB   Database
 	Auth *auth.Service
 	Now  func() time.Time
+
+	// LeaseTTL is how long a worker's status report stays believable. It is the API's copy
+	// of the worker's lease TTL: a report older than one lease came from a worker that no
+	// longer holds the integration, and "live, as of forty minutes ago" is the sentence the
+	// freshness object exists to keep out of a response (K39).
+	LeaseTTL time.Duration
 }
+
+// defaultLeaseTTL matches cmd/worker's. Duplicated rather than shared because the two
+// processes are deployed separately and may briefly disagree; the consequence of a stale
+// value here is a status believed a little too long or too briefly, never a wrong number.
+const defaultLeaseTTL = 2 * time.Minute
 
 // NewRouter builds the HTTP surface. Every operation is behind requireSession unless it
 // declares itself public, so the failure mode of forgetting to think about auth is a 401,
@@ -43,12 +54,16 @@ type Deps struct {
 // The OpenAPI document and the docs page are served unauthenticated: they describe the
 // contract and carry no tenant data.
 func NewRouter(d Deps) http.Handler {
+	if d.LeaseTTL <= 0 {
+		d.LeaseTTL = defaultLeaseTTL
+	}
 	router := chi.NewMux()
 	api := humachi.New(router, huma.DefaultConfig("Plimsoll", APIVersion))
 	api.UseMiddleware(d.requireSession(api))
 
 	d.registerHealth(api)
 	d.registerAuth(api)
+	d.registerPortfolio(api)
 
 	return router
 }

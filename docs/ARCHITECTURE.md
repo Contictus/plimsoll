@@ -279,6 +279,9 @@ Replaces the boolean `stale` (K23, L11). It is API surface, not diagnostics:
 | `unknown_symbol` | alias resolution failed (K22) |
 | `reconciliation_mismatch` | an open finding above tolerance |
 | `fee_price_missing` | no price for a fee asset at `event_time` (K18) |
+| `valuation_unavailable` | no price source has run, so the response carries subtotals per quote asset and no total (M3; M4 removes it) |
+| `ingest_stalled` | no worker is reading an integration, or the one that was has stopped reporting (K39) |
+| `projection_lagging` | events are in the ledger that the fold has not reached (K38) |
 
 `status` is the worst severity present. A caller that reads nothing but `status` is
 still safe, which is the point.
@@ -495,8 +498,10 @@ Rules that hold for every endpoint, without exception:
 1. All numbers are JSON **strings** (L1). A `float64` in a client parser is our bug too.
 2. Every response carries `as_of` and `freshness` (L10, L11).
 3. Every total in one response comes from one `valuation_run` (K11).
-4. Ledger pagination is cursor-based on `seq` — stable because the ledger is
-   append-only (L2). Offset pagination would skip rows as new events land.
+4. Ledger pagination is cursor-based on the canonical order `(event_time, venue_sequence,
+   venue_event_id)`, never on `seq` -- identity values are assigned before commit, so a
+   `seq` cursor can skip a row that was still in flight (K20, K41). While a backfill is
+   running the page is a view of an incomplete set, and the response says so.
 5. Mutations are limited to configuration and integrations. **No endpoint writes ledger
    events**, and none ever places an order (L13).
 6. `GET /positions/{id}/lineage` opens any number down to the events and prices that
