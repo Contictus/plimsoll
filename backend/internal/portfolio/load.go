@@ -67,6 +67,14 @@ func read(
 	if err != nil {
 		return Input{}, fmt.Errorf("portfolio: read projection lag for %s: %w", accountID, err)
 	}
+	balanceRows, err := q.ListAccountBalances(ctx, accountID)
+	if err != nil {
+		return Input{}, fmt.Errorf("portfolio: read balances for %s: %w", accountID, err)
+	}
+	unattributedIDs, err := q.ListIntegrationsWithUnattributedFees(ctx, accountID)
+	if err != nil {
+		return Input{}, fmt.Errorf("portfolio: read unattributed fees for %s: %w", accountID, err)
+	}
 
 	// Keyed by the projection's own key, so a fee cannot be attached to the wrong
 	// integration's copy of the same instrument.
@@ -83,6 +91,21 @@ func read(
 	lagging := make(map[uuid.UUID]bool, len(laggingIDs))
 	for _, id := range laggingIDs {
 		lagging[id] = true
+	}
+	unattributed := make(map[uuid.UUID]bool, len(unattributedIDs))
+	for _, id := range unattributedIDs {
+		unattributed[id] = true
+	}
+
+	balances := make([]Balance, 0, len(balanceRows))
+	for _, b := range balanceRows {
+		balances = append(balances, Balance{
+			IntegrationID: b.IntegrationID,
+			AssetID:       b.AssetID,
+			Asset:         b.CanonicalSymbol,
+			Quantity:      b.Quantity,
+			LastEventTime: b.LastEventTime,
+		})
 	}
 
 	positions := make([]Position, 0, len(rows))
@@ -102,9 +125,18 @@ func read(
 		})
 	}
 
+	// Ordered worst-cause first is not the point -- freshness.New ranks severity itself.
+	// What matters is that every source of doubt is here, so a reader that trusts `status`
+	// is trusting all of them at once (L11).
+	reasons := []freshness.Reason{ValuationUnavailable(now)}
+	reasons = append(reasons, ReasonsFor(statuses, lagging, now, leaseTTL)...)
+	reasons = append(reasons, NegativeBalances(balances)...)
+	reasons = append(reasons, UnattributedFees(statuses, unattributed, now)...)
+
 	return Input{
 		AsOf:      now,
 		Positions: positions,
-		Reasons:   append([]freshness.Reason{ValuationUnavailable(now)}, ReasonsFor(statuses, lagging, now, leaseTTL)...),
+		Balances:  balances,
+		Reasons:   reasons,
 	}, nil
 }

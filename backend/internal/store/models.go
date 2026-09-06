@@ -46,6 +46,17 @@ type AssetAlias struct {
 	Validity       pgtype.Range[pgtype.Timestamptz]
 }
 
+type AssetBalance struct {
+	AccountID         uuid.UUID
+	IntegrationID     uuid.UUID
+	AssetID           int64
+	Quantity          decimal.Decimal
+	LastEventTime     time.Time
+	LastVenueSequence int64
+	LastVenueEventID  string
+	UpdatedAt         time.Time
+}
+
 type BackfillProgress struct {
 	AccountID     uuid.UUID
 	IntegrationID uuid.UUID
@@ -133,6 +144,7 @@ type LedgerEvent struct {
 	IngestedAt    time.Time
 	Raw           []byte
 	AssetID       *int64
+	FeeAssetID    *int64
 }
 
 type Position struct {

@@ -100,3 +100,59 @@ func stalled(s ingest.Status, name string, now time.Time) freshness.Reason {
 	}
 	return freshness.Reason{Code: freshness.ReasonIngestStalled, Severity: severity, Detail: detail, Since: since}
 }
+
+// NegativeBalances reports every asset the ledger says the account holds less than nothing
+// of. It is K14's strongest check: it finds a missing event without knowing what the
+// missing event was, because an account cannot sell what it never had.
+//
+// An error, not a warning. A balance that cannot exist means the numbers built on it are
+// wrong rather than merely late, and the difference between those two is the whole reason
+// severity exists.
+//
+// One reason per asset, and the asset is named. "Something is negative" is not actionable;
+// "you are 0.4 BTC short on binance/main" is where an operator starts.
+func NegativeBalances(balances []Balance) []freshness.Reason {
+	var out []freshness.Reason
+	for _, b := range balances {
+		if !b.Quantity.IsNegative() {
+			continue
+		}
+		out = append(out, freshness.Reason{
+			Code:     freshness.ReasonNegativeBalance,
+			Severity: freshness.SeverityError,
+			Detail: fmt.Sprintf(
+				"the ledger implies holding %s %s, which cannot be true: an event is missing",
+				b.Quantity.String(), b.Asset),
+			// When it first went negative is not knowable without replaying, and this
+			// endpoint does not replay. LastEventTime is the honest nearest thing: the
+			// balance has been what it is at least since then.
+			Since: b.LastEventTime,
+		})
+	}
+	return out
+}
+
+// UnattributedFees reports integrations holding a fee whose asset never resolved.
+//
+// The fee was stored -- losing a fill to keep a fee would be the worse trade (K22) -- so
+// the balance for that asset is short by exactly those amounts. A warning rather than an
+// error: the shortfall is bounded by the fees themselves, and every other number is intact.
+func UnattributedFees(
+	statuses []ingest.Status, unattributed map[uuid.UUID]bool, now time.Time,
+) []freshness.Reason {
+	var out []freshness.Reason
+	for _, s := range statuses {
+		if !unattributed[s.IntegrationID] {
+			continue
+		}
+		out = append(out, freshness.Reason{
+			Code:     freshness.ReasonUnknownSymbol,
+			Severity: freshness.SeverityWarn,
+			Detail: fmt.Sprintf(
+				"%s %s: a fee was paid in a ticker the asset registry does not cover, so the"+
+					" balance for it is short by that fee", s.Exchange, s.Label),
+			Since: now,
+		})
+	}
+	return out
+}

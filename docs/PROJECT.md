@@ -17,7 +17,7 @@ down to its events.
 
 | Document | Contains |
 |---|---|
-| `DECISIONS.md` | K1–K43: every architectural decision, its rationale and its cost |
+| `DECISIONS.md` | K1–K45: every architectural decision, its rationale and its cost |
 | `ARCHITECTURE.md` | Module boundaries, data flow, tenancy mechanics, worker model, schema deltas |
 | `COMPETITIVE-ANALYSIS.md` | Market segmentation, the gap, competitor failure modes |
 | `../CLAUDE.md` = `../AGENTS.md` | Agent operating manual: invariants, workflow, definition of done |
@@ -345,7 +345,7 @@ Directories are created when the module is written, not in advance.
 | **M1** ✅ | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
 | **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
 | **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
-| **M3.5** | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
+| **M3.5** 🟡 | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
 | **M4** | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working |
 | **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
 | **M6** | Strategy + risk + alerting | Strategy-level net delta; thresholds with hysteresis and cooldown; Telegram/webhook; SSE; dashboard v1 |
@@ -402,6 +402,24 @@ What M3 does **not** have, by decision rather than omission: no total. M4 owns p
 `GET /portfolio` reports subtotals per quote asset and carries `valuation_unavailable`
 (K40). Adding realized PnL denominated in USDT to realized PnL denominated in BTC would
 produce a number with no unit.
+
+**M3.5 is half shipped, and the half is named.** `asset_balances` folds beside the
+positions over the same events, so a spot account can finally be asked what it holds
+rather than only what its exposures cost (K44). Two of the milestone's checks run against
+it and appear in every portfolio response:
+
+| M3.5 exit criterion | Status |
+|---|---|
+| Negative-balance check running | **done** — `negative_balance`, severity `error`, one reason per asset, and it goes quiet when the deposits pay for the fills |
+| Unknown-symbol check running | **done** — a fee in an uncurated ticker raises `unknown_symbol` and the shortfall is exactly that fee (K45) |
+| Gap check running | **done since M2** — `ws_gap` from the published worker state (K39) |
+| A spot ↔ futures transfer is not counted as a sale | **not started** — `transfer_links` and the matching heuristic (K12) |
+
+The transfer half is deliberately last: nothing produces a `TRANSFER` event yet, because
+Binance reports an intra-venue move through the universal-transfer endpoint and V1 ingests
+spot only. The balance engine already fixes the convention that normalizer must honour — a
+transfer's quantity is **signed**, positive in and negative out — and enforces it with a
+test, so the fold is waiting rather than undefined.
 
 **M0 comes first because tenancy cannot be retrofitted.** Adding `account_id` and RLS to
 a schema that already holds a real ledger means rebuilding every table.

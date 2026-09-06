@@ -609,6 +609,55 @@ this check and never its answer.
 
 ---
 
+### K44 — Balances are the other fold, and negative is a finding rather than a bug · `extends L3`
+
+M3 shipped a portfolio made of positions. That is the right answer for a derivatives
+account and half of one for a spot account: "long 0.5 BTC at 60000" does not say how much
+USDT is left. `asset_balances` is the other fold over the same events — a buy acquires the
+base and *spends the quote*, and a fold that only credited the base would show free money.
+
+It folds **beside** the positions, in the same transaction, on the same cursor. Two
+cursors over one event stream are two chances to disagree about what has been folded, and
+the disagreement would be silent (L6). It gets its own rebuild-equality test for the same
+reason positions have one: a balance that survived a rebuild only because nothing checked
+it is exactly the second source of truth L3 forbids.
+
+**The quantity column has no non-negative CHECK, on purpose.** A negative balance is not a
+storage error — it is K14's strongest data-quality signal: the ledger implies selling more
+than was ever held, so an event is missing, and the check finds that without knowing what
+the missing event was. A constraint forbidding it would turn the finding into a crash and
+lose the evidence. It surfaces as a field on the row *and* as `negative_balance` at
+severity `error`, so a client that reads nothing but `status` is still warned.
+
+The half that makes the check worth having is that it goes quiet: an account whose
+deposits pay for its fills raises nothing. A check that fires on every account is not a
+check.
+
+---
+
+### K45 — The fee's asset is resolved at ingest, and an unknown ticker costs the fee, not the fill
+
+`fee_asset` holds the exchange's ticker, and a ticker is not a key (K10, K22). To move a
+balance we need the asset, and resolving it at **fold** time would resolve it with whatever
+mapping is current then — the industry's number-one silent corruption. `fee_asset_id` is
+therefore written at ingest, which is the only moment the event's own `event_time` is
+unambiguously in hand (L8).
+
+The column is nullable and must stay so. A ticker the registry does not cover is a real
+possibility, and rejecting the trade over it would **lose a fill to keep a fee** — trading
+the irreplaceable half for the replaceable one. So: the trade stores, `fee_asset_id` stays
+NULL, the balance fold refuses to guess, the projector drops that one fee's balance effect,
+and the reader is told through `unknown_symbol`. The shortfall is exact, bounded by the fee
+itself, and visible.
+
+**Only `asset.ErrUnknownSymbol` is swallowed.** A resolver failing for any other reason —
+the database unreachable, say — still fails the normalization. Silently dropping every fee
+attribution for the duration of an outage is not the same thing at all, and it would leave
+nothing to find afterwards. The mutation that widened the swallow to every error is killed
+by a named test.
+
+---
+
 ---
 
 ## Deliberately Out of Scope

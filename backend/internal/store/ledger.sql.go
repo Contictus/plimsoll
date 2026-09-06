@@ -16,14 +16,14 @@ import (
 const insertLedgerEvent = `-- name: InsertLedgerEvent :execrows
 INSERT INTO ledger_events (
   account_id, integration_id, venue_event_id, venue_sequence, source, event_type,
-  instrument_id, asset_id, strategy_id, side, quantity, price, fee, fee_asset,
+  instrument_id, asset_id, strategy_id, side, quantity, price, fee, fee_asset, fee_asset_id,
   event_time, raw
 ) VALUES (
   $1, $2, $3,
   $4, $5, $6,
   $7, $8, $9, $10,
-  $11, $12, $13, $14,
-  $15, $16
+  $11, $12, $13, $14, $15,
+  $16, $17
 )
 ON CONFLICT (integration_id, venue_event_id) DO NOTHING
 `
@@ -43,6 +43,7 @@ type InsertLedgerEventParams struct {
 	Price         decimal.NullDecimal
 	Fee           decimal.NullDecimal
 	FeeAsset      *string
+	FeeAssetID    *int64
 	EventTime     time.Time
 	Raw           []byte
 }
@@ -66,6 +67,7 @@ func (q *Queries) InsertLedgerEvent(ctx context.Context, arg InsertLedgerEventPa
 		arg.Price,
 		arg.Fee,
 		arg.FeeAsset,
+		arg.FeeAssetID,
 		arg.EventTime,
 		arg.Raw,
 	)
@@ -78,7 +80,7 @@ func (q *Queries) InsertLedgerEvent(ctx context.Context, arg InsertLedgerEventPa
 const streamLedgerEvents = `-- name: StreamLedgerEvents :many
 SELECT seq, account_id, integration_id, venue_event_id, venue_sequence, source,
        event_type, instrument_id, strategy_id, side, quantity, price, fee, fee_asset,
-       event_time, ingested_at, raw, asset_id
+       event_time, ingested_at, raw, asset_id, fee_asset_id
 FROM ledger_events
 WHERE account_id = $1
   AND integration_id = $2
@@ -138,6 +140,7 @@ func (q *Queries) StreamLedgerEvents(ctx context.Context, arg StreamLedgerEvents
 			&i.IngestedAt,
 			&i.Raw,
 			&i.AssetID,
+			&i.FeeAssetID,
 		); err != nil {
 			return nil, err
 		}

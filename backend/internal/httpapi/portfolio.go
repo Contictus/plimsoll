@@ -46,6 +46,21 @@ type positionBody struct {
 	LastEventTime time.Time `json:"last_event_time" doc:"the event time of the last fill folded into this row"`
 }
 
+// balanceBody is how much of one asset is actually held, as opposed to what a position
+// cost. For a spot account this is the question being asked, and M3 shipped without it.
+type balanceBody struct {
+	IntegrationID uuid.UUID `json:"integration_id"`
+	Asset         string    `json:"asset"`
+	Quantity      string    `json:"quantity"`
+
+	// Negative means the ledger implies holding less than nothing, which cannot be true of
+	// an exchange account: an event is missing (K14). Surfaced as a field so a client can
+	// mark the row, and as a freshness reason so a client reading only status is still
+	// warned.
+	Negative      bool      `json:"negative"`
+	LastEventTime time.Time `json:"last_event_time"`
+}
+
 type quoteTotalBody struct {
 	Asset       string `json:"asset"`
 	CostBasis   string `json:"cost_basis"`
@@ -59,6 +74,7 @@ type quoteTotalBody struct {
 type portfolioBody struct {
 	freshness.Envelope
 	Positions []positionBody   `json:"positions"`
+	Balances  []balanceBody    `json:"balances"`
 	Subtotals []quoteTotalBody `json:"subtotals_by_quote_asset"`
 	Fees      []feeBody        `json:"fees" doc:"every fee this account has paid, per asset, unconverted"`
 }
@@ -112,6 +128,20 @@ func renderPositions(hs []portfolio.Holding) []positionBody {
 	return out
 }
 
+func renderBalances(bs []portfolio.Balance) []balanceBody {
+	out := make([]balanceBody, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, balanceBody{
+			IntegrationID: b.IntegrationID,
+			Asset:         b.Asset,
+			Quantity:      b.Quantity.String(),
+			Negative:      b.Negative,
+			LastEventTime: b.LastEventTime,
+		})
+	}
+	return out
+}
+
 func envelopeOf(p portfolio.Portfolio) freshness.Envelope {
 	return freshness.Envelope{AsOf: p.AsOf, Freshness: p.Freshness}
 }
@@ -156,6 +186,7 @@ func (d Deps) registerPortfolio(api huma.API) {
 		return &struct{ Body portfolioBody }{Body: portfolioBody{
 			Envelope:  envelopeOf(p),
 			Positions: renderPositions(p.Holdings),
+			Balances:  renderBalances(p.Balances),
 			Subtotals: subtotals,
 			Fees:      renderFees(p.Fees),
 		}}, nil

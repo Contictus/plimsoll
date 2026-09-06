@@ -209,6 +209,7 @@ func eventOf(row store.ListPositionEventsAfterRow, accountID, integrationID uuid
 	if row.FeeAsset != nil {
 		event.FeeAsset = *row.FeeAsset
 	}
+	event.FeeAssetID = row.FeeAssetID
 	return event
 }
 

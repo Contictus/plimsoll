@@ -48,7 +48,7 @@ var unmodelledEvents = map[string]string{
 
 // StreamIngester normalizes one live user data event into canonical events.
 type StreamIngester struct {
-	Resolver binance.InstrumentResolver
+	Resolver binance.Resolver
 	Context  binance.IngestContext
 }
 

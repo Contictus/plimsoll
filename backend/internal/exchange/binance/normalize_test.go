@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -459,4 +460,61 @@ func mutateJSON(t *testing.T, raw json.RawMessage, patch map[string]any) json.Ra
 	out, err := json.Marshal(object)
 	require.NoError(t, err)
 	return out
+}
+
+// The fee's asset is resolved at ingest, as of the event's own event_time and never
+// today's mapping (L8, K22). Resolving it at fold time would ask the question again with
+// whatever mapping is current then, which is the industry's number-one silent corruption.
+func TestTheFeeAssetIsResolvedAsOfTheTradesOwnTime(t *testing.T) {
+	const bnbAsset int64 = 909
+	resolver := resolverFor("BNBBTC", bnbbtcInstrument)
+	resolver.assetWindows = []aliasWindow{{
+		symbol: "BNB", from: time.Unix(0, 0),
+		to: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), instrument: bnbAsset,
+	}}
+
+	event, err := binance.NormalizeSpotTrade(context.Background(), resolver, testContext(), firstTrade(t))
+	require.NoError(t, err)
+
+	require.NotNil(t, event.FeeAssetID)
+	require.Equal(t, bnbAsset, *event.FeeAssetID)
+	require.Len(t, resolver.assetCalls, 1)
+	require.Equal(t, time.UnixMilli(1499865549590).UTC(), resolver.assetCalls[0].at.UTC(),
+		"the fee asset was resolved with a clock reading rather than the trade's own time")
+}
+
+// A ticker the registry does not cover must not cost us the fill, which is the
+// irreplaceable half. The trade stores with no fee asset id; the balance fold then refuses
+// to guess and the reader is told through unknown_symbol (L11).
+func TestAnUnknownFeeTickerLeavesTheIDUnsetAndKeepsTheFill(t *testing.T) {
+	resolver := resolverFor("BNBBTC", bnbbtcInstrument) // no asset windows at all
+
+	event, err := binance.NormalizeSpotTrade(context.Background(), resolver, testContext(), firstTrade(t))
+	require.NoError(t, err, "an uncurated fee ticker must not lose the trade")
+
+	require.Nil(t, event.FeeAssetID)
+	require.Equal(t, "BNB", event.FeeAsset, "the ticker is still recorded; only the id is absent")
+	require.Equal(t, "10.1", event.Fee.Decimal.String())
+}
+
+// Only ErrUnknownSymbol is swallowed. A resolver that is failing for some other reason --
+// the database being unreachable, say -- must fail the normalization, because silently
+// dropping every fee attribution for the duration of an outage is not the same thing at
+// all, and it would leave no trace to find afterwards.
+func TestAResolverFailingForAnotherReasonStopsTheNormalization(t *testing.T) {
+	resolver := &brokenAssetResolver{fakeResolver: resolverFor("BNBBTC", bnbbtcInstrument)}
+
+	_, err := binance.NormalizeSpotTrade(context.Background(), resolver, testContext(), firstTrade(t))
+	require.Error(t, err)
+	require.ErrorIs(t, err, errResolverBroken)
+}
+
+var errResolverBroken = errors.New("asset registry is unreachable")
+
+type brokenAssetResolver struct {
+	*fakeResolver
+}
+
+func (b *brokenAssetResolver) Asset(context.Context, string, time.Time) (int64, error) {
+	return 0, errResolverBroken
 }

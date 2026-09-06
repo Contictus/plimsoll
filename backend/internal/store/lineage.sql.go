@@ -15,7 +15,8 @@ import (
 
 const listPositionEventsAfter = `-- name: ListPositionEventsAfter :many
 SELECT seq, venue_event_id, venue_sequence, source, event_type, instrument_id, asset_id,
-       strategy_id, side, quantity, price, fee, fee_asset, event_time, ingested_at, raw
+       strategy_id, side, quantity, price, fee, fee_asset, fee_asset_id,
+       event_time, ingested_at, raw
 FROM ledger_events
 WHERE account_id = $1
   AND integration_id = $2
@@ -52,6 +53,7 @@ type ListPositionEventsAfterRow struct {
 	Price         decimal.NullDecimal
 	Fee           decimal.NullDecimal
 	FeeAsset      *string
+	FeeAssetID    *int64
 	EventTime     time.Time
 	IngestedAt    time.Time
 	Raw           []byte
@@ -93,6 +95,7 @@ func (q *Queries) ListPositionEventsAfter(ctx context.Context, arg ListPositionE
 			&i.Price,
 			&i.Fee,
 			&i.FeeAsset,
+			&i.FeeAssetID,
 			&i.EventTime,
 			&i.IngestedAt,
 			&i.Raw,

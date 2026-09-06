@@ -63,6 +63,23 @@ type Holding struct {
 	Flat bool
 }
 
+// Balance is how much of one asset an integration holds. It is the other half of a
+// portfolio: a position says what an exposure cost, a balance says what is actually there,
+// and for a spot account the second is the question being asked.
+type Balance struct {
+	IntegrationID uuid.UUID
+	AssetID       int64
+	Asset         string
+	Quantity      decimal.Decimal
+	LastEventTime time.Time
+
+	// Negative means the ledger implies holding less than nothing, which cannot be true of
+	// an exchange account. It is surfaced as a field and as a freshness reason: the field
+	// so a client can mark the row, the reason so a client that reads nothing but status is
+	// still warned (K14, L11).
+	Negative bool
+}
+
 // QuoteTotal is the subtotal for everything denominated in one asset. It is a subtotal and
 // never a total, and the type name says so on purpose.
 type QuoteTotal struct {
@@ -76,6 +93,7 @@ type QuoteTotal struct {
 type Input struct {
 	AsOf      time.Time
 	Positions []Position
+	Balances  []Balance
 	Reasons   []freshness.Reason
 }
 
@@ -86,6 +104,7 @@ type Portfolio struct {
 	AsOf time.Time
 
 	Holdings  []Holding
+	Balances  []Balance
 	ByQuote   []QuoteTotal
 	Fees      []position.FeeTotal
 	Freshness freshness.Report
@@ -100,10 +119,23 @@ func Build(in Input) Portfolio {
 	out := Portfolio{
 		AsOf:      in.AsOf,
 		Holdings:  make([]Holding, 0, len(in.Positions)),
+		Balances:  make([]Balance, 0, len(in.Balances)),
 		ByQuote:   make([]QuoteTotal, 0),
 		Fees:      make([]position.FeeTotal, 0),
 		Freshness: freshness.New(in.Reasons...),
 	}
+
+	for _, b := range in.Balances {
+		b.Negative = b.Quantity.IsNegative()
+		out.Balances = append(out.Balances, b)
+	}
+	sort.Slice(out.Balances, func(i, j int) bool {
+		a, b := out.Balances[i], out.Balances[j]
+		if a.Asset != b.Asset {
+			return a.Asset < b.Asset
+		}
+		return a.IntegrationID.String() < b.IntegrationID.String()
+	})
 
 	quotes := map[string]QuoteTotal{}
 	fees := map[string]decimal.Decimal{}
