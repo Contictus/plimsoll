@@ -1,3 +1,7 @@
+// Package httpapi is the read-side HTTP surface: routing, the session cookie, and the
+// handlers. It never writes ledger events and never places an order (L13,
+// ARCHITECTURE.md section 10). The envelope every response carries lives in
+// internal/freshness, which the packages that raise a reason also depend on.
 package httpapi
 
 import (

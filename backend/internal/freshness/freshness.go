@@ -1,7 +1,12 @@
-// Package httpapi is the read-side HTTP surface: routing, the session cookie, and the
-// envelope every data response carries. It never writes ledger events and never places an
-// order (L13, ARCHITECTURE.md §10).
-package httpapi
+// Package freshness is the vocabulary in which a response admits what it is missing: the
+// closed set of reason codes, their severities, and the envelope every data response
+// carries (K23, L10, L11).
+//
+// It is its own package, and not part of httpapi, because the packages that *raise* a
+// reason are not the package that serves it. The ingestion state enum and the portfolio
+// read model both need this vocabulary, and httpapi needs both of them -- so leaving the
+// types in httpapi makes an import cycle out of what is really one shared contract.
+package freshness
 
 import "time"
 
@@ -45,6 +50,24 @@ const (
 	ReasonUnknownSymbol          = "unknown_symbol"
 	ReasonReconciliationMismatch = "reconciliation_mismatch"
 	ReasonFeePriceMissing        = "fee_price_missing"
+
+	// ReasonValuationUnavailable means no price source has run, so the response carries no
+	// total -- only subtotals per quote asset. It is a warning and not an error on purpose:
+	// every number present is exact, and marking an exact response unreliable erodes what
+	// `status` means just as surely as failing to mark a wrong one.
+	ReasonValuationUnavailable = "valuation_unavailable"
+
+	// ReasonIngestStalled means nothing is currently reading this integration: no worker has
+	// ever reported on it, or the one that did has stopped saying anything. Distinct from
+	// ws_gap, which is a worker that is running and telling you its feed is down. This one
+	// is the absence of a reporter, which is why it cannot be raised by a worker.
+	ReasonIngestStalled = "ingest_stalled"
+
+	// ReasonProjectionLagging means events are in the ledger that the fold has not reached,
+	// so the positions in this response are behind the events that produced them. Expected
+	// briefly and constantly -- the fold runs on a ticker (K38) -- and a warning rather than
+	// an error because the shortfall is bounded by that tick and closes on its own.
+	ReasonProjectionLagging = "projection_lagging"
 )
 
 // Reason explains one way in which a response is less than fully current. Detail is for a
@@ -56,9 +79,9 @@ type Reason struct {
 	Since    time.Time `json:"since"    doc:"when this condition started"`
 }
 
-// Freshness replaces the boolean `stale` (K23). It is API surface, not diagnostics:
+// Report replaces the boolean `stale` (K23). It is API surface, not diagnostics:
 // degraded and visible always beats confident and wrong (L11).
-type Freshness struct {
+type Report struct {
 	Status  Status   `json:"status" enum:"ok,degraded,unreliable"`
 	Reasons []Reason `json:"reasons"`
 }
@@ -68,14 +91,14 @@ type Freshness struct {
 // time the response was serialized.
 type Envelope struct {
 	AsOf      time.Time `json:"as_of"`
-	Freshness Freshness `json:"freshness"`
+	Freshness Report    `json:"freshness"`
 }
 
-// NewFreshness derives Status from the worst severity present, so a caller reading only
+// New derives Status from the worst severity present, so a caller reading only
 // Status is never misled by an error buried under later warnings. Reasons is always a
 // list, never nil, so a client can iterate it without a nil check.
-func NewFreshness(reasons ...Reason) Freshness {
-	out := Freshness{Status: StatusOK, Reasons: make([]Reason, 0, len(reasons))}
+func New(reasons ...Reason) Report {
+	out := Report{Status: StatusOK, Reasons: make([]Reason, 0, len(reasons))}
 	for _, r := range reasons {
 		out.Reasons = append(out.Reasons, r)
 		switch r.Severity {

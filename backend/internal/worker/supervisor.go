@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
-	"github.com/Contictus/plimsoll/backend/internal/httpapi"
+	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -169,14 +169,14 @@ func (s *Supervisor) State() ingest.State {
 
 // Freshness is what the current state costs a reader, stamped with when it started. It is
 // what a portfolio response embeds, and it is why the state enum exists at all (L11, K23).
-func (s *Supervisor) Freshness() (httpapi.Reason, bool) {
+func (s *Supervisor) Freshness() (freshness.Reason, bool) {
 	s.mu.Lock()
 	state, since := ingest.Classify(s.conditions), s.since
 	s.mu.Unlock()
 
 	reason, degraded := state.Reason()
 	if !degraded {
-		return httpapi.Reason{}, false
+		return freshness.Reason{}, false
 	}
 	reason.Since = since
 	return reason, true

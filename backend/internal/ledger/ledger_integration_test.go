@@ -97,7 +97,7 @@ func deposit(t *testing.T, accountID, integrationID uuid.UUID, venueEventID stri
 	t.Helper()
 	assetID := seedAsset(t)
 	return ledger.Event{
-		AssetID: &assetID,
+		AssetID:       &assetID,
 		AccountID:     accountID,
 		IntegrationID: integrationID,
 		VenueEventID:  venueEventID,

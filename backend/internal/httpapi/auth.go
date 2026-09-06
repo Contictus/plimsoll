@@ -7,17 +7,18 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
+	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 )
 
-// accountBody is what the caller learns about itself. It carries the Envelope for the
+// accountBody is what the caller learns about itself. It carries the freshness.Envelope for the
 // same reason a portfolio response does: an endpoint that is allowed to answer without
 // as_of and freshness is the precedent that lets the next one skip them too (L10, L11).
 type accountBody struct {
-	Envelope
+	freshness.Envelope
 	AccountID uuid.UUID `json:"account_id"`
 	Email     string    `json:"email"`
 	IsAdmin   bool      `json:"is_admin"`
@@ -165,11 +166,11 @@ func (d Deps) account(ctx context.Context, accountID uuid.UUID) (accountBody, er
 		return accountBody{}, err
 	}
 	return accountBody{
-		Envelope: Envelope{
+		Envelope: freshness.Envelope{
 			// The account is read inside the request, so the response is current as of
 			// now. Once a valuation run backs a response, as_of comes from the run (L10).
 			AsOf:      d.Now(),
-			Freshness: NewFreshness(),
+			Freshness: freshness.New(),
 		},
 		AccountID: row.ID,
 		Email:     row.Email,

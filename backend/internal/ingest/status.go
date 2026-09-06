@@ -82,34 +82,47 @@ func ReadStatus(
 ) ([]Status, error) {
 	var out []Status
 	err := tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
-		rows, err := q.ListIntegrationStatus(ctx, accountID)
-		if err != nil {
-			return fmt.Errorf("ingest: read status for account %s: %w", accountID, err)
-		}
-		out = make([]Status, 0, len(rows))
-		for _, r := range rows {
-			s := Status{
-				IntegrationID: r.IntegrationID,
-				Exchange:      r.Exchange,
-				Label:         r.Label,
-				Configured:    r.ConfiguredStatus,
-			}
-			if r.State != nil {
-				s.Reported = true
-				s.State = State(*r.State)
-				if r.OwnerID != nil {
-					s.OwnerID = *r.OwnerID
-				}
-				if r.Since != nil {
-					s.Since = *r.Since
-				}
-				if r.UpdatedAt != nil {
-					s.UpdatedAt = *r.UpdatedAt
-				}
-			}
-			out = append(out, s)
-		}
-		return nil
+		var err error
+		out, err = StatusIn(ctx, q, accountID)
+		return err
 	})
 	return out, err
+}
+
+// StatusIn is ReadStatus inside a transaction the caller already owns. A portfolio response
+// reads the positions and the statuses that qualify them; doing that in two transactions
+// could show a position from after the status describing it, which is a response that
+// contradicts itself (L10).
+func StatusIn(ctx context.Context, q *store.Queries, accountID uuid.UUID) ([]Status, error) {
+	rows, err := q.ListIntegrationStatus(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: read status for account %s: %w", accountID, err)
+	}
+
+	out := make([]Status, 0, len(rows))
+	for _, r := range rows {
+		s := Status{
+			IntegrationID: r.IntegrationID,
+			Exchange:      r.Exchange,
+			Label:         r.Label,
+			Configured:    r.ConfiguredStatus,
+		}
+		// A NULL state is the LEFT JOIN finding no report at all, which is not a state --
+		// it is the absence of one, and Reported is what keeps the two distinguishable.
+		if r.State != nil {
+			s.Reported = true
+			s.State = State(*r.State)
+			if r.OwnerID != nil {
+				s.OwnerID = *r.OwnerID
+			}
+			if r.Since != nil {
+				s.Since = *r.Since
+			}
+			if r.UpdatedAt != nil {
+				s.UpdatedAt = *r.UpdatedAt
+			}
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
