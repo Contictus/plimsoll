@@ -3,7 +3,7 @@ package ingest_test
 import (
 	"testing"
 
-	"github.com/Contictus/plimsoll/backend/internal/httpapi"
+	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +26,7 @@ func TestEveryStateDeclaresWhatItMeansForFreshness(t *testing.T) {
 			}
 			require.NotEmpty(t, reason.Code, "%s has no reason code", state)
 			require.Contains(t,
-				[]httpapi.Severity{httpapi.SeverityInfo, httpapi.SeverityWarn, httpapi.SeverityError},
+				[]freshness.Severity{freshness.SeverityInfo, freshness.SeverityWarn, freshness.SeverityError},
 				reason.Severity, "%s has no severity", state)
 			require.NotEmpty(t, reason.Detail, "%s says nothing a human can read", state)
 		})
@@ -37,14 +37,14 @@ func TestEveryStateDeclaresWhatItMeansForFreshness(t *testing.T) {
 // response no client can match on, which is a degradation that reads as silence.
 func TestStateReasonsComeFromTheClosedSet(t *testing.T) {
 	closed := map[string]bool{
-		httpapi.ReasonWSGap:                  true,
-		httpapi.ReasonPriceStale:             true,
-		httpapi.ReasonBackfillIncomplete:     true,
-		httpapi.ReasonHistoryTruncated:       true,
-		httpapi.ReasonAssumedPeg:             true,
-		httpapi.ReasonUnknownSymbol:          true,
-		httpapi.ReasonReconciliationMismatch: true,
-		httpapi.ReasonFeePriceMissing:        true,
+		freshness.ReasonWSGap:                  true,
+		freshness.ReasonPriceStale:             true,
+		freshness.ReasonBackfillIncomplete:     true,
+		freshness.ReasonHistoryTruncated:       true,
+		freshness.ReasonAssumedPeg:             true,
+		freshness.ReasonUnknownSymbol:          true,
+		freshness.ReasonReconciliationMismatch: true,
+		freshness.ReasonFeePriceMissing:        true,
 	}
 	for _, state := range ingest.AllStates {
 		if reason, degraded := state.Reason(); degraded {

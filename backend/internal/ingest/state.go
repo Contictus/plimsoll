@@ -8,7 +8,7 @@
 package ingest
 
 import (
-	"github.com/Contictus/plimsoll/backend/internal/httpapi"
+	"github.com/Contictus/plimsoll/backend/internal/freshness"
 )
 
 // State is what the ingestion for one integration is currently doing. It exists so that a
@@ -55,25 +55,25 @@ var AllStates = []State{
 // reason code is a response no client can match on, and the constants exist precisely to
 // make that impossible -- which is worth this package depending on the HTTP one for a
 // vocabulary both of them speak.
-var stateReasons = map[State]httpapi.Reason{
+var stateReasons = map[State]freshness.Reason{
 	StateConnecting: {
-		Code:     httpapi.ReasonWSGap,
-		Severity: httpapi.SeverityWarn,
+		Code:     freshness.ReasonWSGap,
+		Severity: freshness.SeverityWarn,
 		Detail:   "the live feed has not connected yet; events since the last run may be missing",
 	},
 	StateDegraded: {
-		Code:     httpapi.ReasonWSGap,
-		Severity: httpapi.SeverityError,
+		Code:     freshness.ReasonWSGap,
+		Severity: freshness.SeverityError,
 		Detail:   "the live feed is down; trades happening now are not being recorded",
 	},
 	StateResyncing: {
-		Code:     httpapi.ReasonWSGap,
-		Severity: httpapi.SeverityWarn,
+		Code:     freshness.ReasonWSGap,
+		Severity: freshness.SeverityWarn,
 		Detail:   "replaying the window the live feed was disconnected for",
 	},
 	StateBackfilling: {
-		Code:     httpapi.ReasonBackfillIncomplete,
-		Severity: httpapi.SeverityWarn,
+		Code:     freshness.ReasonBackfillIncomplete,
+		Severity: freshness.SeverityWarn,
 		Detail:   "historical import is still running; totals do not yet cover the full history",
 	},
 }
@@ -83,7 +83,7 @@ var stateReasons = map[State]httpapi.Reason{
 //
 // Since is deliberately not set here: the state knows what is wrong, not how long it has
 // been. The supervisor stamps it from the moment it entered the state.
-func (s State) Reason() (httpapi.Reason, bool) {
+func (s State) Reason() (freshness.Reason, bool) {
 	reason, degraded := stateReasons[s]
 	return reason, degraded
 }
