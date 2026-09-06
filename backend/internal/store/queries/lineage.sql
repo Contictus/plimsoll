@@ -5,7 +5,8 @@
 -- anything, and holding all of it in memory to render the last page of it would make the
 -- endpoint's cost a property of the account's history rather than of the request.
 SELECT seq, venue_event_id, venue_sequence, source, event_type, instrument_id, asset_id,
-       strategy_id, side, quantity, price, fee, fee_asset, event_time, ingested_at, raw
+       strategy_id, side, quantity, price, fee, fee_asset, fee_asset_id,
+       event_time, ingested_at, raw
 FROM ledger_events
 WHERE account_id = sqlc.arg(account_id)
   AND integration_id = sqlc.arg(integration_id)

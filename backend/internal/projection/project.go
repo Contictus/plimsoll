@@ -167,6 +167,11 @@ func dropProjection(ctx context.Context, q *store.Queries, accountID, integratio
 	}); err != nil {
 		return fmt.Errorf("projection: drop positions for %s: %w", integrationID, err)
 	}
+	if err := q.DropAssetBalances(ctx, store.DropAssetBalancesParams{
+		AccountID: accountID, IntegrationID: integrationID,
+	}); err != nil {
+		return fmt.Errorf("projection: drop balances for %s: %w", integrationID, err)
+	}
 	if err := q.DropProjectionCursor(ctx, store.DropProjectionCursorParams{
 		AccountID: accountID, IntegrationID: integrationID,
 	}); err != nil {
@@ -213,8 +218,17 @@ func fold(ctx context.Context, q *store.Queries, accountID, integrationID uuid.U
 	if err != nil {
 		return 0, err
 	}
+	// The balances fold beside the positions, over the same events, in the same transaction
+	// and on the same cursor. Two cursors over one event stream are two chances to disagree
+	// about what has been folded, and the disagreement would be silent (L6).
+	balances, err := loadBalances(ctx, q, accountID, integrationID)
+	if err != nil {
+		return 0, err
+	}
+	lookup := newLegLookup(q)
 
 	touched := map[int64]bool{}
+	touchedAssets := map[int64]bool{}
 	folded := 0
 
 	for {
@@ -230,6 +244,10 @@ func fold(ctx context.Context, q *store.Queries, accountID, integrationID uuid.U
 			// position. Skipping them would make the projector reread them forever.
 			cursor = e.Cursor()
 			folded++
+
+			if err := applyBalance(ctx, lookup, balances, touchedAssets, e); err != nil {
+				return folded, err
+			}
 
 			if e.InstrumentID == nil {
 				// A balance event genuinely has no instrument and changes no position, so
@@ -267,6 +285,9 @@ func fold(ctx context.Context, q *store.Queries, accountID, integrationID uuid.U
 		if err := writePosition(ctx, q, accountID, integrationID, instrumentID, states[instrumentID]); err != nil {
 			return folded, err
 		}
+	}
+	if err := writeBalances(ctx, q, accountID, integrationID, balances, touchedAssets); err != nil {
+		return folded, err
 	}
 	if err := q.UpsertProjectionCursor(ctx, store.UpsertProjectionCursorParams{
 		AccountID:         accountID,

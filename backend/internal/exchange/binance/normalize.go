@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/asset"
 	"github.com/Contictus/plimsoll/backend/internal/instrument"
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
 	"github.com/google/uuid"
@@ -47,6 +48,14 @@ type InstrumentResolver interface {
 	// Instrument returns the instrument behind an exchange symbol as it stood at `at`,
 	// which is always the event's own event_time -- never time.Now() (L8).
 	Instrument(ctx context.Context, market instrument.Market, symbol string, at time.Time) (int64, error)
+}
+
+// Resolver resolves both halves of what a fill names: the instrument behind its symbol and
+// the asset behind its fee ticker. One interface because a fill needs both and splitting
+// them would let a call site supply half of what an event costs.
+type Resolver interface {
+	InstrumentResolver
+	AssetResolver
 }
 
 // IngestContext is everything the payload cannot say: whose event this is, and which path
@@ -196,7 +205,7 @@ var nonFillExecutionTypes = map[string]bool{
 // raw is stored verbatim (L15): when a normalization bug surfaces months from now, the
 // thing that saves the project is replaying these exact bytes.
 func NormalizeSpotTrade(
-	ctx context.Context, r InstrumentResolver, tc IngestContext, raw json.RawMessage,
+	ctx context.Context, r Resolver, tc IngestContext, raw json.RawMessage,
 ) (ledger.Event, error) {
 	var trade restTrade
 	if err := json.Unmarshal(raw, &trade); err != nil {
@@ -223,7 +232,7 @@ func NormalizeSpotTrade(
 // event. It returns ErrNotAFill for the many updates that are not trades; the caller skips
 // those and treats every other error as a data-quality finding (K14).
 func NormalizeStreamExecutionReport(
-	ctx context.Context, r InstrumentResolver, tc IngestContext, raw json.RawMessage,
+	ctx context.Context, r Resolver, tc IngestContext, raw json.RawMessage,
 ) (ledger.Event, error) {
 	report, err := parseExecutionReport(raw)
 	if err != nil {
@@ -281,7 +290,7 @@ type tradeFields struct {
 }
 
 func buildTrade(
-	ctx context.Context, r InstrumentResolver, tc IngestContext, f tradeFields,
+	ctx context.Context, r Resolver, tc IngestContext, f tradeFields,
 ) (ledger.Event, error) {
 	if f.symbol == "" {
 		return ledger.Event{}, fmt.Errorf("%w: no symbol", ErrMalformedTrade)
@@ -336,6 +345,29 @@ func buildTrade(
 		feeAsset = ""
 	}
 
+	// Resolved here and not at fold time, because here is where the event's own time is
+	// unambiguously in hand (L8, K22). Resolving it later means resolving it with whatever
+	// mapping is current then, which is the industry's number-one silent corruption.
+	//
+	// An unknown ticker is swallowed on purpose, and only that one: a coin we have not
+	// curated yet must not cost us the fill, which is the irreplaceable half. The fee's
+	// balance effect is then refused rather than guessed, and the reader is told
+	// (unknown_symbol, L11). Any other error -- the database being unreachable, say --
+	// still fails the normalization, because silently dropping every fee for the duration
+	// of an outage is not the same thing at all.
+	var feeAssetID *int64
+	if feeAsset != "" {
+		id, err := r.Asset(ctx, feeAsset, eventTime)
+		switch {
+		case err == nil:
+			feeAssetID = &id
+		case errors.Is(err, asset.ErrUnknownSymbol):
+		default:
+			return ledger.Event{}, fmt.Errorf("normalize %s trade %d fee asset: %w",
+				f.symbol, f.tradeID, err)
+		}
+	}
+
 	return ledger.Event{
 		AccountID:     tc.AccountID,
 		IntegrationID: tc.IntegrationID,
@@ -356,8 +388,9 @@ func buildTrade(
 		// The fee rides on the event that caused it and is never folded into the price
 		// (K18, L9). Folding it is invisible on one trade and wrong on every cost basis
 		// after it.
-		Fee:      fee,
-		FeeAsset: feeAsset,
+		Fee:        fee,
+		FeeAsset:   feeAsset,
+		FeeAssetID: feeAssetID,
 
 		EventTime: eventTime,
 		Raw:       f.raw,

@@ -123,3 +123,9 @@ func New(reasons ...Reason) Report {
 // qualification: the whole product claim is that the numbers are right and we can prove it,
 // so a proof that comes out different is the most serious thing an API can report.
 const ReasonLineageMismatch = "lineage_mismatch"
+
+// ReasonNegativeBalance means the ledger implies holding less than nothing of an asset --
+// selling more than was ever acquired. It is K14's strongest check because it finds a
+// missing event without knowing what the missing event was, and it is an error: a balance
+// that cannot exist means the numbers built on it are wrong, not merely late.
+const ReasonNegativeBalance = "negative_balance"

@@ -78,6 +78,16 @@ type Event struct {
 	Fee      decimal.NullDecimal
 	FeeAsset string
 
+	// FeeAssetID is FeeAsset resolved to the canonical registry, as of this event's own
+	// event_time and never today's mapping (L8, K22). Resolved at ingest because that is
+	// the only moment the event's time is unambiguously in hand.
+	//
+	// Nil when there is no fee -- and also when there is one whose ticker did not resolve,
+	// which is a different thing. The trade is still stored: losing a fill to keep a fee
+	// would be the worse trade. The balance fold then refuses to guess, and the reader is
+	// told through unknown_symbol rather than left with a quiet shortfall (L11).
+	FeeAssetID *int64
+
 	EventTime  time.Time
 	IngestedAt time.Time
 

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/asset"
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/Contictus/plimsoll/backend/internal/instrument"
 )
@@ -204,10 +205,15 @@ func (r fakeRegistry) Instrument(
 	return id, nil
 }
 
+// Asset wraps asset.ErrUnknownSymbol for a ticker it does not hold, because that sentinel
+// is the contract rather than a detail: the normalizer swallows exactly that error to keep
+// a fill whose fee asset is uncurated, and treats every other one as fatal. A fake that
+// returned a plain error would make the two indistinguishable and the test would be
+// exercising the fatal path while claiming to exercise the other.
 func (r fakeRegistry) Asset(_ context.Context, symbol string, _ time.Time) (int64, error) {
 	id, ok := r.assets[symbol]
 	if !ok {
-		return 0, fmt.Errorf("fake registry: no asset for %s", symbol)
+		return 0, fmt.Errorf("%w: fake registry has no asset for %s", asset.ErrUnknownSymbol, symbol)
 	}
 	return id, nil
 }

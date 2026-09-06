@@ -484,3 +484,113 @@ func TestAnOrdinaryIncrementalRunDoesNotRebuild(t *testing.T) {
 	require.Equal(t, 1, res.EventsFolded)
 	require.Equal(t, "150", snapshot(t, accountID, integrationID)[0].AvgEntryPrice.String())
 }
+
+// balanceRow is one asset_balances row, compared exactly for the same reason positions are:
+// a rebuild that produces a different string produces a different number.
+type balanceRow struct {
+	AssetID           int64
+	Quantity          decimal.Decimal
+	LastEventTime     time.Time
+	LastVenueSequence int64
+	LastVenueEventID  string
+}
+
+func balanceSnapshot(t *testing.T, accountID, integrationID uuid.UUID) []balanceRow {
+	t.Helper()
+	ctx := context.Background()
+	var rows []balanceRow
+
+	require.NoError(t, tenancy.InTxRaw(ctx, appPool(t), accountID, func(tx pgx.Tx) error {
+		result, err := tx.Query(ctx,
+			`SELECT asset_id, quantity, last_event_time, last_venue_sequence,
+			        last_venue_event_id
+			 FROM asset_balances WHERE integration_id = $1 ORDER BY asset_id`, integrationID)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+		for result.Next() {
+			var r balanceRow
+			if err := result.Scan(&r.AssetID, &r.Quantity, &r.LastEventTime,
+				&r.LastVenueSequence, &r.LastVenueEventID); err != nil {
+				return err
+			}
+			rows = append(rows, r)
+		}
+		return result.Err()
+	}))
+	return rows
+}
+
+// L3 applies to every projection table, not to the one that happened to exist first.
+// asset_balances folds beside positions, over the same events and on the same cursor, so it
+// gets the same rebuild-equality test -- and a balance that survived a rebuild only because
+// nothing checked it would be exactly the second source of truth L3 forbids.
+func TestRebuildingReproducesTheBalancesAsWellAsThePositions(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	first, second := seedInstrument(t), seedInstrument(t)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "2", "100", 1), accountID, integrationID, first),
+		storable(withFee(trade(ledger.SideBuy, "1", "50", 2), "0.01", "BNB"),
+			accountID, integrationID, second),
+	)
+	project(t, accountID, integrationID)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideSell, "3", "120", 3), accountID, integrationID, first),
+	)
+	project(t, accountID, integrationID)
+
+	incremental := balanceSnapshot(t, accountID, integrationID)
+	require.NotEmpty(t, incremental, "the fold produced no balances at all")
+
+	require.NoError(t,
+		projection.Rebuild(context.Background(), appPool(t), accountID, integrationID))
+
+	require.Empty(t, cmp.Diff(incremental, balanceSnapshot(t, accountID, integrationID),
+		compareExactly), "the balances cannot be rebuilt from the ledger")
+}
+
+// The balance a buy leaves behind, checked as arithmetic rather than as equality with
+// itself: 2 at 100 spends 200 of the quote and acquires 2 of the base, and a sell of 3 at
+// 120 takes the base negative -- which is legal here and is the strongest data-quality
+// signal there is (K14).
+func TestTheBalanceFoldSpendsTheQuoteAndCanGoNegative(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+	base, quote := legsOf(t, instrumentID)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "2", "100", 1), accountID, integrationID, instrumentID),
+	)
+	project(t, accountID, integrationID)
+
+	held := map[int64]string{}
+	for _, b := range balanceSnapshot(t, accountID, integrationID) {
+		held[b.AssetID] = b.Quantity.String()
+	}
+	require.Equal(t, "2", held[base])
+	require.Equal(t, "-200", held[quote],
+		"buying spends the quote; a fold that only credited the base would show free money")
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideSell, "3", "120", 2), accountID, integrationID, instrumentID),
+	)
+	project(t, accountID, integrationID)
+
+	for _, b := range balanceSnapshot(t, accountID, integrationID) {
+		held[b.AssetID] = b.Quantity.String()
+	}
+	require.Equal(t, "-1", held[base],
+		"selling more than was held goes negative rather than clamping: the clamp would "+
+			"hide the missing event this number exists to reveal")
+}
+
+func legsOf(t *testing.T, instrumentID int64) (base, quote int64) {
+	t.Helper()
+	require.NoError(t, ownerPool(t).QueryRow(context.Background(),
+		`SELECT base_asset_id, quote_asset_id FROM instruments WHERE id = $1`,
+		instrumentID).Scan(&base, &quote))
+	return base, quote
+}
