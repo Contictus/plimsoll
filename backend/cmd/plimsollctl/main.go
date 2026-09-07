@@ -18,6 +18,11 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/store"
 )
 
+// ownerDSNEnv is where every subcommand finds its connection. The owner role, never the
+// app role: this tool does DDL and mints invites, and the request-serving role must hold
+// neither power (K15, K16).
+const ownerDSNEnv = "PLIMSOLL_OWNER_DSN"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "plimsollctl:", err)
@@ -29,14 +34,17 @@ func main() {
 // flag.Parse stops at the first non-flag argument, so passing it the whole slice would
 // silently ignore every flag that follows the subcommand.
 func run(args []string) error {
-	const usage = "usage: plimsollctl <invite|record> ...\n" +
+	const usage = "usage: plimsollctl <invite|record|migrate> ...\n" +
 		"  plimsollctl invite -email <address> [-ttl 168h]\n" +
-		"  " + recordUsage
+		"  " + recordUsage + "\n" +
+		"  " + migrateUsage
 
 	if len(args) == 0 {
 		return fmt.Errorf("%s", usage)
 	}
 	switch args[0] {
+	case "migrate":
+		return runMigrate()
 	case "invite":
 		return runInvite(args[1:])
 	case "record":
@@ -61,9 +69,9 @@ func runInvite(args []string) error {
 		return fmt.Errorf("%s", usage)
 	}
 
-	dsn := os.Getenv("PLIMSOLL_OWNER_DSN")
+	dsn := os.Getenv(ownerDSNEnv)
 	if dsn == "" {
-		return fmt.Errorf("PLIMSOLL_OWNER_DSN is not set")
+		return fmt.Errorf("%s is not set", ownerDSNEnv)
 	}
 
 	ctx := context.Background()
