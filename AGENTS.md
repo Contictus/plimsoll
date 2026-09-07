@@ -172,16 +172,31 @@ result up to "done".
 
 ```
 make generate           # sqlc — regenerate typed queries; output is committed
-make migrate            # goose up (runs as the owner role, not the app role)
+make migrate            # goose up against a local checkout (owner role, never the app role)
 make test               # unit: pure engines, no Docker, fast
 make test-integration   # //go:build integration — real Postgres via compose
 make lint               # golangci-lint
 make docs-check         # CLAUDE.md ≡ AGENTS.md
-make up / make down     # docker compose
+make up / make down     # docker compose; `up` migrates first and waits for it (K46)
 ```
 
 `make test` must stay fast enough to run on every save. If it starts needing Docker,
 an engine has grown a dependency it should not have (L4).
+
+**`make migrate` is for a checkout, not for the stack.** Inside compose the schema is
+applied by a one-shot `migrate` service running `plimsollctl migrate`, which carries the
+migrations embedded in its own binary — so the image and the schema it applies cannot be
+different revisions of each other, and the api and the worker cannot start against a
+database that has not been migrated (K46). Running `make up` is enough; running
+`make migrate` afterwards is a no-op.
+
+The operator CLI is the only thing that connects as `plimsoll_owner`:
+
+```
+plimsollctl migrate                          # apply every pending migration
+plimsollctl invite -email <addr> [-ttl 168h] # mint a single-use invite      (K16)
+plimsollctl record ...                       # capture a redacted fixture
+```
 
 ---
 
@@ -205,6 +220,9 @@ an engine has grown a dependency it should not have (L4).
 
 ## 6. Repository Layout
 
+**Written.** This half is the map of what exists; if a module is here, read it before
+writing something that overlaps it.
+
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
@@ -212,37 +230,54 @@ docs/
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
+  plans/                   per-milestone implementation plans
 backend/
-  cmd/{api,worker}/
+  cmd/api/                 HTTP process — reads only, never writes the ledger
+  cmd/worker/              the sole ledger writer; one supervisor per integration
+  cmd/plimsollctl/         operator CLI: migrate · invite · record   (owner role only)
+  migrations/              goose SQL + the embed the CLI ships with       (K46)
   internal/
     auth/          sessions, argon2id, invite-based account creation      (K16)
-    tenancy/       account scoping + the RLS transaction wrapper           (K15)
-    account/
-    integration/   exchange connections, envelope-encrypted credentials    (K25)
-    exchange/binance/   rest, ws, normalizer
-    ratelimit/     two-tier: per-integration weight + shared per-IP        (K24)
-    asset/         canonical asset registry, time-scoped alias resolution  (K10, K22)
-    instrument/
-    ledger/        append-only writes + the fold                           (L2, L3)
-    transfer/      transfer matching                                       (K12)
-    marketdata/
-    valuation/     single valuation policy, USD numeraire, price paths     (K11, K17)
-    position/
-    portfolio/
-    pnl/
-    strategy/      sleeve tagging and strategy-level aggregation           (K13)
-    risk/
-    collateral/    MMR / margin buffer                                     (M5)
-    reconciliation/
-    quality/       data-quality checks                                     (K14)
-    alert/
-    store/         sqlc output + migrations
+    tenancy/       account scoping + the RLS transaction wrapper          (K15)
+    crypto/        envelope encryption: per-account DEK behind a KEK      (K25)
+    integration/   exchange connections and their stored credentials      (K25)
+    exchange/binance/   rest · ws · normalizer · fixtures
+    ratelimit/     two-tier: per-integration weight + shared per-IP       (K24)
+    backfill/      resumable per-scope history walk                       (K26, K33)
+    asset/         canonical asset registry, time-scoped alias resolution (K10, K22)
+    instrument/    the same, for tradeable pairs                          (K10)
+    ledger/        append-only writes + the ordered read                  (L2, L7)
+    position/      the average-cost fold — pure                           (K5, L4)
+    balance/       the asset fold — pure                                  (K44, L4)
+    projection/    the I/O around both folds + rebuild                    (L3, K38)
+    ingest/        the state vocabulary the worker publishes and API reads (K39)
+    worker/        supervisor, lease, stream adapters                     (K20, K37)
+    portfolio/     the read model: holdings, subtotals, lineage           (K40, K43)
+    freshness/     reason codes, severities, the response envelope        (K23, L11)
+    httpapi/       routing, session cookie, handlers                      (K16, K27)
+    obs/           slog with secret redaction + OTel                      (L13)
+    store/         sqlc output and the pool constructor
   testdata/fixtures/binance/   recorded, redacted real payloads
-  migrations/
-frontend/          Next.js dashboard
+deploy/            compose topology, Caddyfile, postgres init
 ```
 
-Directories are created when the module is written, not in advance.
+**Planned.** Not written, and deliberately so — a directory is created when its module is,
+never in advance. Listed because each one is a boundary already decided, so work that
+belongs in it should not be quietly absorbed by a neighbour.
+
+```
+    transfer/      transfer matching                                      (K12, M3.5)
+    marketdata/    price ingest and history                               (M4)
+    valuation/     one valuation policy, USD numeraire, price paths       (K11, K17, M4)
+    pnl/                                                                  (M4)
+    collateral/    MMR / margin buffer                                    (M5)
+    strategy/      sleeve tagging and strategy-level aggregation          (K13, M6)
+    risk/          exposure, leverage, thresholds                         (M6)
+    alert/         hysteresis, cooldown, delivery                         (M6)
+    reconciliation/  our state vs the exchange's                          (M7)
+    quality/       data-quality checks that need no exchange call         (K14, M7)
+frontend/          Next.js dashboard                                      (M6)
+```
 
 ---
 
