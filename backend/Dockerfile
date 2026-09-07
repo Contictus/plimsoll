@@ -1,12 +1,14 @@
-# One Dockerfile, two binaries: the api and the worker differ only in which main they run,
-# and building them from one image keeps their toolchain and dependencies identical by
-# construction.
+# One Dockerfile, three binaries: the api, the worker and the operator CLI differ only in
+# which main they run, and building them from one image keeps their toolchain and
+# dependencies identical by construction -- which matters most for plimsollctl, because it
+# carries the migrations the other two then read.
+
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY . .
 
 ARG CMD
-RUN test -n "$CMD" || (echo "build-arg CMD is required (api|worker)" && exit 1)
+RUN test -n "$CMD" || (echo "build-arg CMD is required (api|worker|plimsollctl)" && exit 1)
 
 # No `go mod download` step. go.mod carries tool directives for sqlc, goose and
 # golangci-lint, so a bare download would pull their whole dependency tree -- hundreds of
