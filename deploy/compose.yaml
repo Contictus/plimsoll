@@ -42,6 +42,27 @@ services:
       timeout: 3s
       retries: 30
 
+  # Migrations run before anything that reads the schema, as a one-shot the other services
+  # wait on. Without it a clean machine brought the stack up, started the worker against an
+  # empty database, and watched it exit on a function that did not exist yet -- a failure
+  # that named a missing function rather than the missing step.
+  #
+  # It runs plimsollctl, which carries the migrations embedded in its own binary, so the
+  # image and the schema it applies cannot be different revisions of each other.
+  migrate:
+    build:
+      context: ../backend
+      args:
+        CMD: plimsollctl
+    command: ["migrate"]
+    environment:
+      # The owner role, never the app role: migrations are DDL (K15).
+      PLIMSOLL_OWNER_DSN: postgres://plimsoll_owner:${PLIMSOLL_OWNER_PASSWORD}@postgres:5432/plimsoll?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: ../backend
@@ -53,6 +74,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       jaeger:
         condition: service_healthy
     healthcheck:
@@ -76,6 +99,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       jaeger:
         condition: service_healthy
 

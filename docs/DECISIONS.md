@@ -658,6 +658,40 @@ by a named test.
 
 ---
 
+### K46 — Migrations are a step in the topology, not a thing an operator remembers · `extends K15`
+
+A clean machine could not bring the stack up. `make up` started the worker against an
+empty database, and it exited on `function worker_active_integrations() does not exist`.
+
+The interesting part is not the fix, it is why it survived so long. Every run until then
+had a database somebody had already migrated by hand, so the missing step was invisible on
+exactly the machines that were doing the testing and fatal on every machine that was not.
+That is the shape of a deployment bug: it cannot be found by the people who already have
+the state, and the failure it produces names a missing *function* rather than a missing
+*step*.
+
+**migrate is a one-shot service the others wait on.** The api and the worker depend on it
+with `service_completed_successfully`, so the schema is current before anything reads it.
+An ordering that is a property of the topology cannot be forgotten; a line in a runbook
+can.
+
+**It runs `plimsollctl migrate`, with the migrations embedded in the binary.** Two things
+follow, and both are the point:
+
+- The image and the schema it applies cannot be different revisions of each other. A
+  container migrating from a mounted directory can be pointed at the wrong revision, and
+  that failure surfaces later as a missing column rather than as the deployment mistake it
+  was.
+- It runs as `plimsoll_owner`, never the app role, for the same reason goose does:
+  migrations are DDL, and the role that serves requests must not hold DDL rights (K15,
+  L12). The one-shot is the only container in the topology that connects as the owner.
+
+The embed is guarded by a test that compares the embedded set against the directory by
+name **and by contents** — two files can share a name and differ in every byte, which is
+exactly what a stale embed is.
+
+---
+
 ---
 
 ## Deliberately Out of Scope
