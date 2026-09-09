@@ -36,3 +36,17 @@ ORDER BY instrument_id, ts DESC;
 
 -- name: CountPriceTicks :one
 SELECT count(*) FROM price_ticks WHERE instrument_id = sqlc.arg(instrument_id);
+
+-- name: ListInstrumentAliasesAt :many
+-- Every exchange symbol we have a canonical instrument for, as it stood at one instant.
+--
+-- The feed carries every symbol the venue lists, which is thousands. Recording a price for
+-- a symbol we have no instrument for would fill the table with rows nothing can join to,
+-- so the registry decides what is worth storing -- and the registry is read as of the
+-- event's own time, never today's mapping (L8, K22).
+SELECT exchange_symbol, instrument_id
+FROM instrument_aliases
+WHERE exchange = sqlc.arg(exchange)
+  AND market = sqlc.arg(market)
+  AND validity @> sqlc.arg(at)::timestamptz
+ORDER BY exchange_symbol;

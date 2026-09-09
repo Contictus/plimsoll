@@ -55,6 +55,52 @@ func (q *Queries) GetPriceTickAt(ctx context.Context, arg GetPriceTickAtParams) 
 	return i, err
 }
 
+const listInstrumentAliasesAt = `-- name: ListInstrumentAliasesAt :many
+SELECT exchange_symbol, instrument_id
+FROM instrument_aliases
+WHERE exchange = $1
+  AND market = $2
+  AND validity @> $3::timestamptz
+ORDER BY exchange_symbol
+`
+
+type ListInstrumentAliasesAtParams struct {
+	Exchange string
+	Market   string
+	At       time.Time
+}
+
+type ListInstrumentAliasesAtRow struct {
+	ExchangeSymbol string
+	InstrumentID   int64
+}
+
+// Every exchange symbol we have a canonical instrument for, as it stood at one instant.
+//
+// The feed carries every symbol the venue lists, which is thousands. Recording a price for
+// a symbol we have no instrument for would fill the table with rows nothing can join to,
+// so the registry decides what is worth storing -- and the registry is read as of the
+// event's own time, never today's mapping (L8, K22).
+func (q *Queries) ListInstrumentAliasesAt(ctx context.Context, arg ListInstrumentAliasesAtParams) ([]ListInstrumentAliasesAtRow, error) {
+	rows, err := q.db.Query(ctx, listInstrumentAliasesAt, arg.Exchange, arg.Market, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInstrumentAliasesAtRow{}
+	for rows.Next() {
+		var i ListInstrumentAliasesAtRow
+		if err := rows.Scan(&i.ExchangeSymbol, &i.InstrumentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestPriceTicks = `-- name: ListLatestPriceTicks :many
 SELECT DISTINCT ON (instrument_id)
        instrument_id, ts, price, source, observed_at
