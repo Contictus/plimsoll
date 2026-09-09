@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -48,58 +49,12 @@ func Produce(
 	if source == "" {
 		return Result{}, errors.New("valuation: a run must say where its prices came from")
 	}
-	if len(pegs) == 0 {
-		// Without something to terminate the walk every asset is unpriceable, and a run of
-		// nothing but failures is worse than no run: it looks like an answer.
-		return Result{}, errors.New("valuation: a run needs at least one assumed asset to terminate its paths")
-	}
 
-	rates, err := loadRates(ctx, q, asOf)
+	walked, err := priceAll(ctx, q, asOf, pegs)
 	if err != nil {
 		return Result{}, err
 	}
-	assets, err := q.ListAssetIDs(ctx)
-	if err != nil {
-		return Result{}, fmt.Errorf("valuation: read asset registry: %w", err)
-	}
-
-	priced := make([]store.InsertValuationPriceParams, 0, len(assets))
-	var (
-		out            Result
-		anyAssumed     bool
-		oldestObserved time.Time
-	)
-
-	for _, assetID := range assets {
-		p, err := PriceOf(assetID, rates, pegs)
-		if errors.Is(err, ErrNoRoute) {
-			out.Unpriceable = append(out.Unpriceable, assetID)
-			continue
-		}
-		if err != nil {
-			return Result{}, fmt.Errorf("valuation: price asset %d: %w", assetID, err)
-		}
-
-		path, err := json.Marshal(p.Path)
-		if err != nil {
-			return Result{}, fmt.Errorf("valuation: encode path for asset %d: %w", assetID, err)
-		}
-		anyAssumed = anyAssumed || p.AssumedPeg
-		if !p.OldestObservedAt.IsZero() &&
-			(oldestObserved.IsZero() || p.OldestObservedAt.Before(oldestObserved)) {
-			oldestObserved = p.OldestObservedAt
-		}
-
-		priced = append(priced, store.InsertValuationPriceParams{
-			AssetID:    assetID,
-			PriceUsd:   p.USD,
-			Path:       path,
-			AssumedPeg: p.AssumedPeg,
-			ObservedAt: nullTime(p.OldestObservedAt),
-		})
-	}
-
-	if len(priced) == 0 {
+	if len(walked.prices) == 0 {
 		// Nothing could be priced at all. Recording an empty run would give a reader
 		// something that looks like a valuation and answers nothing.
 		return Result{}, fmt.Errorf("valuation: no asset could be priced as of %s",
@@ -109,24 +64,104 @@ func Produce(
 	runID, err := q.InsertValuationRun(ctx, store.InsertValuationRunParams{
 		AsOf:             asOf,
 		PriceSource:      source,
-		AssumedPeg:       anyAssumed,
-		OldestObservedAt: nullTime(oldestObserved),
+		AssumedPeg:       walked.anyAssumed,
+		OldestObservedAt: nullTime(walked.oldest),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("valuation: record run: %w", err)
 	}
 
-	for i := range priced {
-		priced[i].RunID = runID
-		if err := q.InsertValuationPrice(ctx, priced[i]); err != nil {
-			return Result{}, fmt.Errorf("valuation: record price for asset %d: %w",
-				priced[i].AssetID, err)
+	// Written in asset order rather than map order, so two runs over the same prices
+	// produce the same rows in the same sequence and a diff between them means something.
+	for _, assetID := range sortedKeys(walked.prices) {
+		p := walked.prices[assetID]
+		path, err := json.Marshal(p.Path)
+		if err != nil {
+			return Result{}, fmt.Errorf("valuation: encode path for asset %d: %w", assetID, err)
+		}
+		if err := q.InsertValuationPrice(ctx, store.InsertValuationPriceParams{
+			RunID:      runID,
+			AssetID:    assetID,
+			PriceUsd:   p.USD,
+			Path:       path,
+			AssumedPeg: p.AssumedPeg,
+			ObservedAt: nullTime(p.ObservedAt),
+		}); err != nil {
+			return Result{}, fmt.Errorf("valuation: record price for asset %d: %w", assetID, err)
 		}
 	}
 
+	out := Result{Unpriceable: walked.unpriceable}
 	out.RunID = runID
-	out.Priced = len(priced)
+	out.Priced = len(walked.prices)
 	return out, nil
+}
+
+// walked is one pass of the price graph, held in memory. Produce records it; At returns it.
+// Both go through here, so a rebuilt run and a recorded one cannot disagree about what the
+// same prices mean -- which is the only thing that makes a past total checkable.
+type walked struct {
+	prices      map[int64]RecordedPrice
+	unpriceable []int64
+	anyAssumed  bool
+	oldest      time.Time
+}
+
+// priceAll routes every asset in the registry to the numeraire as of an instant.
+//
+// An asset that cannot be routed is collected rather than dropped: the caller turns it into
+// "worth X, minus the part we could not price", which is a true sentence, where silently
+// omitting it would make "worth X" a false one.
+func priceAll(
+	ctx context.Context, q *store.Queries, asOf time.Time, pegs PegSet,
+) (walked, error) {
+	if len(pegs) == 0 {
+		// Without something to terminate the walk every asset is unpriceable, and a run of
+		// nothing but failures is worse than no run: it looks like an answer.
+		return walked{}, errors.New(
+			"valuation: a run needs at least one assumed asset to terminate its paths")
+	}
+
+	rates, err := loadRates(ctx, q, asOf)
+	if err != nil {
+		return walked{}, err
+	}
+	assets, err := q.ListAssetIDs(ctx)
+	if err != nil {
+		return walked{}, fmt.Errorf("valuation: read asset registry: %w", err)
+	}
+
+	out := walked{prices: make(map[int64]RecordedPrice, len(assets))}
+	for _, assetID := range assets {
+		p, err := PriceOf(assetID, rates, pegs)
+		if errors.Is(err, ErrNoRoute) {
+			out.unpriceable = append(out.unpriceable, assetID)
+			continue
+		}
+		if err != nil {
+			return walked{}, fmt.Errorf("valuation: price asset %d: %w", assetID, err)
+		}
+
+		out.anyAssumed = out.anyAssumed || p.AssumedPeg
+		if !p.OldestObservedAt.IsZero() &&
+			(out.oldest.IsZero() || p.OldestObservedAt.Before(out.oldest)) {
+			out.oldest = p.OldestObservedAt
+		}
+		out.prices[assetID] = RecordedPrice{
+			AssetID: assetID, USD: p.USD, Path: p.Path,
+			AssumedPeg: p.AssumedPeg, ObservedAt: p.OldestObservedAt,
+		}
+	}
+	return out, nil
+}
+
+func sortedKeys(m map[int64]RecordedPrice) []int64 {
+	out := make([]int64, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // loadRates reads the price graph as it stood at an instant.

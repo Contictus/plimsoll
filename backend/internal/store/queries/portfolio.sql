@@ -68,3 +68,21 @@ JOIN assets a ON a.id = e.fee_asset_id
 WHERE e.account_id = sqlc.arg(account_id)
   AND e.fee_asset_id IS NOT NULL
 ORDER BY a.id;
+
+-- name: ListInstrumentsByIDs :many
+-- The identity of instruments a historical fold produced, named in one read rather than one
+-- per instrument. The alias table is deliberately not consulted: these ids came out of a
+-- fold that already resolved each event's symbol as of its own event_time (L8, K22).
+SELECT i.id, i.canonical_symbol, i.kind, i.base_asset_id, i.quote_asset_id,
+       b.canonical_symbol AS base_asset,
+       q.canonical_symbol AS quote_asset
+FROM instruments i
+JOIN assets b ON b.id = i.base_asset_id
+JOIN assets q ON q.id = i.quote_asset_id
+WHERE i.id = ANY(sqlc.arg(ids)::bigint[])
+ORDER BY i.id;
+
+-- name: ListAssetsByIDs :many
+SELECT id, canonical_symbol FROM assets
+WHERE id = ANY(sqlc.arg(ids)::bigint[])
+ORDER BY id;

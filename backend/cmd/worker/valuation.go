@@ -2,16 +2,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/shopspring/decimal"
 )
 
 const (
@@ -23,12 +20,6 @@ const (
 
 	// priceSource names the feed a run was built from, recorded on every run (K11).
 	priceSource = "binance:spot"
-
-	// defaultPegAssets is what terminates every price path. One asset, not two: the
-	// smaller the set, the more is priced through a real market instead of assumed (K17).
-	// USDT is deliberately absent, so a USDT depeg shows up in the numbers rather than
-	// being assumed away.
-	defaultPegAssets = "USDC"
 )
 
 // runValuations produces a valuation run on a ticker for as long as the process lives.
@@ -90,31 +81,10 @@ func produceOne(ctx context.Context, pool *pgxpool.Pool, pegs valuation.PegSet) 
 	return nil
 }
 
-// loadPegs resolves the configured peg symbols to asset ids.
-//
-// By symbol rather than by id, because configuration names assets the way a human does and
-// an id is a database detail that differs between deployments. A symbol that does not
-// resolve is an error rather than a skip: silently starting with an empty peg set would
-// make every asset unpriceable and the cause invisible.
+// loadPegs reads the configured peg symbols. The resolution itself lives in the valuation
+// package because the API rebuilds runs for `?at=` and must terminate its paths the same
+// way: two readings of one setting is how the same instant comes to have two answers.
 func loadPegs(ctx context.Context, pool *pgxpool.Pool) (valuation.PegSet, error) {
-	configured := envOr("PLIMSOLL_PEG_ASSETS", defaultPegAssets)
-	one := decimal.NewFromInt(1)
-
-	pegs := valuation.PegSet{}
-	q := store.New(pool)
-	for _, symbol := range strings.Split(configured, ",") {
-		symbol = strings.TrimSpace(strings.ToUpper(symbol))
-		if symbol == "" {
-			continue
-		}
-		id, err := q.GetAssetIDBySymbol(ctx, symbol)
-		if err != nil {
-			return nil, fmt.Errorf("peg asset %q is not in the registry: %w", symbol, err)
-		}
-		pegs[id] = one
-	}
-	if len(pegs) == 0 {
-		return nil, errors.New("no peg asset is configured; nothing could terminate a price path")
-	}
-	return pegs, nil
+	return valuation.LoadPegs(ctx, store.New(pool),
+		envOr("PLIMSOLL_PEG_ASSETS", valuation.DefaultPegAssets))
 }

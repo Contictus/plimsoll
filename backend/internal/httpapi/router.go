@@ -11,6 +11,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -48,6 +49,12 @@ type Deps struct {
 	// therefore means the snapshot loop has stopped, which is worth a warning; a tighter
 	// value would only report that some listed pair is quiet, which is not news.
 	PriceTTL time.Duration
+
+	// PegAssets is the comma-separated peg configuration a rebuilt run terminates its price
+	// paths with (K17). The API needs it because `?at=` rebuilds a run rather than reading
+	// one; it is the same setting the worker produces runs with, and the resolution is
+	// shared so the two processes cannot terminate a path differently.
+	PegAssets string
 }
 
 // defaultLeaseTTL matches cmd/worker's. Duplicated rather than shared because the two
@@ -72,6 +79,9 @@ func NewRouter(d Deps) http.Handler {
 	if d.PriceTTL <= 0 {
 		d.PriceTTL = defaultPriceTTL
 	}
+	if d.PegAssets == "" {
+		d.PegAssets = valuation.DefaultPegAssets
+	}
 	router := chi.NewMux()
 	api := humachi.New(router, huma.DefaultConfig("Plimsoll", APIVersion))
 	api.UseMiddleware(d.requireSession(api))
@@ -80,6 +90,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerAuth(api)
 	d.registerPortfolio(api)
 	d.registerLineage(api)
+	d.registerPnL(api)
 
 	return router
 }

@@ -102,3 +102,49 @@ func TestPortfolioTotalIsTheValuedBalancesAndNamesItsRun(t *testing.T) {
 		}
 	}
 }
+
+// The lineage's other half. The steps say what was traded; the prices say what it is worth
+// and how the walk got there. Multiplying a path's rates must reproduce its price exactly --
+// not to within a rounding error, which is not a proof (K11, K17).
+func TestLineageCarriesThePricePathItWasValuedThrough(t *testing.T) {
+	ctx := context.Background()
+	srv := newServer(t)
+	cookie := register(t, srv, uniqueEmail("lineage-prices"))
+	accountID := accountOf(t, srv, cookie)
+	integrationID, instrumentID, _, _ := seedFoldedPosition(t, accountID)
+
+	quoteAssetID := quoteAssetOf(t, instrumentID)
+	appendDeposit(t, accountID, integrationID, quoteAssetID, "1000")
+	_, err := projection.Project(ctx, appPool(t), accountID, integrationID)
+	require.NoError(t, err)
+
+	at := time.Now().UTC()
+	seedPrice(t, instrumentID, "200", at.Add(-time.Minute))
+	produceRun(t, quoteAssetID, at)
+
+	list := decodeJSON(t, do(t, http.MethodGet, srv.URL+"/positions", cookie))
+	id := list["positions"].([]any)[0].(map[string]any)["id"].(string)
+	body := decodeJSON(t, do(t, http.MethodGet, srv.URL+"/positions/"+id+"/lineage", cookie))
+	requireMoneyIsString(t, body, "lineage")
+
+	prices := body["prices"].([]any)
+	require.Len(t, prices, 2, "the base and the quote, in that order")
+
+	base := prices[0].(map[string]any)
+	require.Equal(t, float64(baseAssetOf(t, instrumentID)), base["asset_id"])
+	require.Equal(t, "200", base["price_usd"], "one hop through the seeded pair at a pegged quote")
+
+	// The audit property: the hops multiply out to the price that was served.
+	product := decimal.RequireFromString("1")
+	hops := base["path"].([]any)
+	require.NotEmpty(t, hops)
+	for _, h := range hops {
+		product = product.Mul(decimal.RequireFromString(h.(map[string]any)["rate"].(string)))
+	}
+	require.Equal(t, base["price_usd"], product.String(),
+		"a path a reader cannot multiply out is a number nobody can check")
+
+	quote := prices[1].(map[string]any)
+	require.Equal(t, float64(quoteAssetID), quote["asset_id"])
+	require.Equal(t, true, quote["assumed_peg"], "the quote asset is the peg this run terminates on")
+}

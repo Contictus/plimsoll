@@ -22,16 +22,22 @@ import (
 
 const testPassword = "hunter2-hunter2"
 
-func newServer(t *testing.T) *httptest.Server {
+func newServer(t *testing.T) *httptest.Server { return newServerWithPegs(t, "") }
+
+// newServerWithPegs is newServer with the peg configuration a rebuilt run terminates its
+// price paths with. A test that asks for `?at=` needs one that exists in this database,
+// because every pair a test seeds is unique to it (K17).
+func newServerWithPegs(t *testing.T, pegs string) *httptest.Server {
 	t.Helper()
 	pool, err := store.NewPool(context.Background(), os.Getenv("PLIMSOLL_APP_DSN"))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
 	srv := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
-		DB:   pool,
-		Auth: auth.NewService(store.New(pool), pool, 24*time.Hour),
-		Now:  time.Now,
+		DB:        pool,
+		Auth:      auth.NewService(store.New(pool), pool, 24*time.Hour),
+		Now:       time.Now,
+		PegAssets: pegs,
 	}))
 	t.Cleanup(srv.Close)
 	return srv

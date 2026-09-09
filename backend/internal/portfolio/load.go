@@ -14,6 +14,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// Window is the clock and the tolerances one read is judged against: when it was asked, how
+// long a worker's report stays believable, and how old a price may be before the response
+// says so.
+//
+// One struct rather than three parameters because every read endpoint needs all three and a
+// call site that passed them in the wrong order would still compile -- two durations next to
+// each other is a defect waiting for a hurried afternoon.
+type Window struct {
+	Now      time.Time
+	LeaseTTL time.Duration
+	PriceTTL time.Duration
+}
+
 // Load reads one account's portfolio and everything needed to qualify it.
 //
 // Every read happens in one transaction, deliberately. A response built from positions read
@@ -21,19 +34,18 @@ import (
 // after the status that describes it -- and "one response, one consistent view" is the same
 // rule that makes a valuation run singular (K11, L10).
 //
-// now, leaseTTL and priceTTL are parameters rather than a clock and two constants, so the
-// freshness ranking is testable without waiting for anything (L4).
+// The Window is a parameter rather than a clock and two constants, so the freshness ranking
+// is testable without waiting for anything (L4).
 func Load(
 	ctx context.Context,
 	db tenancy.Beginner,
 	accountID uuid.UUID,
-	now time.Time,
-	leaseTTL, priceTTL time.Duration,
+	w Window,
 ) (Portfolio, error) {
 	var in Input
 	err := tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
 		var err error
-		in, err = read(ctx, q, accountID, now, leaseTTL, priceTTL)
+		in, err = read(ctx, q, accountID, w)
 		return err
 	})
 	if err != nil {
@@ -45,13 +57,8 @@ func Load(
 // read gathers the rows. Split from Load so that a caller already inside a transaction --
 // the lineage endpoint, which needs the same qualification for one position -- reads the
 // same way rather than a second way.
-func read(
-	ctx context.Context,
-	q *store.Queries,
-	accountID uuid.UUID,
-	now time.Time,
-	leaseTTL, priceTTL time.Duration,
-) (Input, error) {
+func read(ctx context.Context, q *store.Queries, accountID uuid.UUID, w Window) (Input, error) {
+	now, leaseTTL, priceTTL := w.Now, w.LeaseTTL, w.PriceTTL
 	rows, err := q.ListAccountPositions(ctx, accountID)
 	if err != nil {
 		return Input{}, fmt.Errorf("portfolio: read positions for %s: %w", accountID, err)

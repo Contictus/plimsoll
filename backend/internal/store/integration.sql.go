@@ -43,6 +43,41 @@ func (q *Queries) GetIntegrationCredential(ctx context.Context, arg GetIntegrati
 	return i, err
 }
 
+const listAccountIntegrations = `-- name: ListAccountIntegrations :many
+SELECT id, exchange, label FROM integrations
+WHERE account_id = $1
+ORDER BY id
+`
+
+type ListAccountIntegrationsRow struct {
+	ID       uuid.UUID
+	Exchange string
+	Label    string
+}
+
+// Every connection this account has, whatever state it is in. Paused and errored ones are
+// included on purpose: a portfolio as of a past instant is folded from what happened, and
+// what happened does not stop having happened when a connection is later paused.
+func (q *Queries) ListAccountIntegrations(ctx context.Context, accountID uuid.UUID) ([]ListAccountIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, listAccountIntegrations, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountIntegrationsRow{}
+	for rows.Next() {
+		var i ListAccountIntegrationsRow
+		if err := rows.Scan(&i.ID, &i.Exchange, &i.Label); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setIntegrationCredential = `-- name: SetIntegrationCredential :execrows
 UPDATE integrations
 SET credential_ciphertext = $1,
