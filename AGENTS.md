@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K47). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K48). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -226,7 +226,7 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K47 decision register
+  DECISIONS.md             K1–K48 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
@@ -252,7 +252,7 @@ backend/
     projection/    the I/O around both folds + rebuild                    (L3, K38)
     ingest/        the state vocabulary the worker publishes and API reads (K39)
     worker/        supervisor, lease, stream adapters                     (K20, K37)
-    portfolio/     the read model: holdings, totals, subtotals, lineage    (K40, K43, K47)
+    portfolio/     the read model: holdings, totals, history at T, pnl (K43, K47, K48)
     marketdata/    price ingest: REST snapshot, live stream, minute ticks   (K7, M4)
     valuation/     one run, USD numeraire, auditable price paths        (K11, K17, M4)
     freshness/     reason codes, severities, the response envelope        (K23, L11)
@@ -269,7 +269,6 @@ belongs in it should not be quietly absorbed by a neighbour.
 
 ```
     transfer/      transfer matching                                      (K12, M3.5)
-    pnl/                                                                  (M4)
     collateral/    MMR / margin buffer                                    (M5)
     strategy/      sleeve tagging and strategy-level aggregation          (K13, M6)
     risk/          exposure, leverage, thresholds                         (M6)

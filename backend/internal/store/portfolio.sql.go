@@ -166,6 +166,89 @@ func (q *Queries) ListAccountPositions(ctx context.Context, accountID uuid.UUID)
 	return items, nil
 }
 
+const listAssetsByIDs = `-- name: ListAssetsByIDs :many
+SELECT id, canonical_symbol FROM assets
+WHERE id = ANY($1::bigint[])
+ORDER BY id
+`
+
+type ListAssetsByIDsRow struct {
+	ID              int64
+	CanonicalSymbol string
+}
+
+func (q *Queries) ListAssetsByIDs(ctx context.Context, ids []int64) ([]ListAssetsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listAssetsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAssetsByIDsRow{}
+	for rows.Next() {
+		var i ListAssetsByIDsRow
+		if err := rows.Scan(&i.ID, &i.CanonicalSymbol); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInstrumentsByIDs = `-- name: ListInstrumentsByIDs :many
+SELECT i.id, i.canonical_symbol, i.kind, i.base_asset_id, i.quote_asset_id,
+       b.canonical_symbol AS base_asset,
+       q.canonical_symbol AS quote_asset
+FROM instruments i
+JOIN assets b ON b.id = i.base_asset_id
+JOIN assets q ON q.id = i.quote_asset_id
+WHERE i.id = ANY($1::bigint[])
+ORDER BY i.id
+`
+
+type ListInstrumentsByIDsRow struct {
+	ID              int64
+	CanonicalSymbol string
+	Kind            string
+	BaseAssetID     int64
+	QuoteAssetID    int64
+	BaseAsset       string
+	QuoteAsset      string
+}
+
+// The identity of instruments a historical fold produced, named in one read rather than one
+// per instrument. The alias table is deliberately not consulted: these ids came out of a
+// fold that already resolved each event's symbol as of its own event_time (L8, K22).
+func (q *Queries) ListInstrumentsByIDs(ctx context.Context, ids []int64) ([]ListInstrumentsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listInstrumentsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInstrumentsByIDsRow{}
+	for rows.Next() {
+		var i ListInstrumentsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CanonicalSymbol,
+			&i.Kind,
+			&i.BaseAssetID,
+			&i.QuoteAssetID,
+			&i.BaseAsset,
+			&i.QuoteAsset,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLaggingIntegrations = `-- name: ListLaggingIntegrations :many
 SELECT i.id AS integration_id
 FROM integrations i

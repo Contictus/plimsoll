@@ -12,6 +12,7 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/google/uuid"
 )
 
@@ -60,6 +61,15 @@ type Lineage struct {
 	Steps       []Step
 	TotalEvents int
 
+	// Prices are the legs this position is valued through, taken from the same run the
+	// response's numbers came from, each with the hops that produced it. This is the half of
+	// the audit trail that the ledger cannot supply: the events say what was traded, the
+	// path says what it was worth and how we got there (K11, K17).
+	//
+	// Two entries at most -- the base and the quote -- and fewer when the run could not price
+	// one of them, which is exactly when the position carries no market value.
+	Prices []valuation.RecordedPrice
+
 	Freshness freshness.Report
 }
 
@@ -79,8 +89,7 @@ func LoadLineage(
 	accountID uuid.UUID,
 	id string,
 	steps int,
-	now time.Time,
-	leaseTTL, priceTTL time.Duration,
+	w Window,
 ) (Lineage, error) {
 	integrationID, instrumentID, err := ParsePositionID(id)
 	if err != nil {
@@ -95,7 +104,7 @@ func LoadLineage(
 
 	var out Lineage
 	err = tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
-		in, err := read(ctx, q, accountID, now, leaseTTL, priceTTL)
+		in, err := read(ctx, q, accountID, w)
 		if err != nil {
 			return err
 		}
@@ -107,7 +116,10 @@ func LoadLineage(
 		if err != nil {
 			return err
 		}
-		out.AsOf = now
+		out.AsOf = w.Now
+		if in.Valuation != nil {
+			out.Prices = pricesBehind(in.Valuation, holding)
+		}
 		out.Position = holding
 		out.Freshness = freshness.New(append(in.Reasons, disagreement(holding, out)...)...)
 		return nil
@@ -246,4 +258,16 @@ func disagreement(stored Holding, replayed Lineage) []freshness.Reason {
 			stored.Quantity, stored.AvgEntryPrice, stored.RealizedPnL),
 		Since: replayed.AsOf,
 	}}
+}
+
+// pricesBehind picks the legs this position is valued through, in a fixed order -- base then
+// quote -- so two reads of the same position produce the same block.
+func pricesBehind(run *valuation.Run, h Holding) []valuation.RecordedPrice {
+	out := make([]valuation.RecordedPrice, 0, 2)
+	for _, assetID := range []int64{h.BaseAssetID, h.QuoteAssetID} {
+		if p, ok := run.Prices[assetID]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -19,3 +19,11 @@ WHERE account_id = sqlc.arg(account_id)
 -- The worker's only cross-account read, through the SECURITY DEFINER surface in 00015.
 -- Everything it does afterwards is bound to one account and scoped by RLS.
 SELECT * FROM worker_active_integrations();
+
+-- name: ListAccountIntegrations :many
+-- Every connection this account has, whatever state it is in. Paused and errored ones are
+-- included on purpose: a portfolio as of a past instant is folded from what happened, and
+-- what happened does not stop having happened when a connection is later paused.
+SELECT id, exchange, label FROM integrations
+WHERE account_id = sqlc.arg(account_id)
+ORDER BY id;

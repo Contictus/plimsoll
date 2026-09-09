@@ -319,21 +319,24 @@ checks — a snapshot is a cache, so adding one must change this endpoint's timi
 its answer.
 
 **Steps:**
-- [ ] **Step 1: Failing test — `?at=` before the first event is an empty portfolio**, not
+- [x] **Step 1: Failing test — `?at=` before the first event is an empty portfolio**, not
   today's portfolio with an old timestamp.
-- [ ] **Step 2: Failing test — `?at=` inside a gap in `price_ticks` reports the gap**
+- [x] **Step 2: Failing test — `?at=` inside a gap in `price_ticks` reports the gap**
   rather than reaching forward to the next price. Reaching forward is look-ahead bias, and
   in a risk product it is the bug that makes a backtest look brilliant.
-- [ ] **Step 3: Failing test — the same T twice gives byte-identical answers.**
-- [ ] **Step 4: `GET /pnl?from&to`** — realized from the ledger, unrealized from the run at
+- [x] **Step 3: Failing test — the same T twice gives byte-identical answers.**
+- [x] **Step 4: `GET /pnl?from&to`** — realized from the ledger, unrealized from the run at
   each end.
-- [ ] **Step 4b: `GET /portfolio/history?from&to&interval`** — `?at=` applied at each
+- [ ] **Step 4b (not shipped): `GET /portfolio/history?from&to&interval`** — `?at=` applied at each
   interval boundary. Listed in `PROJECT.md` §5 and not in M4's exit criteria, so it lands
   here only if Steps 1–4 are green and the fold at T is fast enough to run N times; if it
   is not, that is the measurement that justifies `position_snapshots` rather than a guess.
-- [ ] **Step 5: Fill lineage's `prices` block**, which M3 shipped present and empty exactly
+  **Outcome:** not shipped. The measurement the step asks for cannot be taken yet -- the only
+  ledgers that exist are test fixtures, and timing a four-event fold would be an assumption
+  wearing evidence's clothes. Recorded as K48.
+- [x] **Step 5: Fill lineage's `prices` block**, which M3 shipped present and empty exactly
   so this could land without changing the shape a client parses.
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ---
 

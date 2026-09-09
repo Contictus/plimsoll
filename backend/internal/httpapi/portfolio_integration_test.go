@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,13 +107,15 @@ func seedPair(t *testing.T) (instrumentID int64, symbol, quote string) {
 	ctx := context.Background()
 	pool := ownerPool(t)
 
-	symbol = "AP-" + uuid.NewString()
-	quote = "AQ-" + uuid.NewString()
+	// Upper case, because a canonical symbol is: peg configuration names assets the way a
+	// human writes a ticker and is normalized to upper case when it resolves them (K17).
+	symbol = "AP-" + strings.ToUpper(uuid.NewString())
+	quote = "AQ-" + strings.ToUpper(uuid.NewString())
 
 	var baseID, quoteID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO assets (canonical_symbol, kind) VALUES ($1, 'native') RETURNING id`,
-		"AB-"+uuid.NewString()).Scan(&baseID))
+		"AB-"+strings.ToUpper(uuid.NewString())).Scan(&baseID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO assets (canonical_symbol, kind) VALUES ($1, 'stablecoin') RETURNING id`,
 		quote).Scan(&quoteID))

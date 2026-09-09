@@ -9,6 +9,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/portfolio"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 )
@@ -70,9 +71,35 @@ type lineageBody struct {
 	Steps       []stepBody   `json:"steps" doc:"the most recent events, oldest first"`
 	TotalEvents int          `json:"total_events" doc:"how many events folded into this position in all"`
 
-	// Prices is empty until M4 records price paths. Present and empty rather than absent,
-	// so the shape a client parses does not change when it fills (ARCHITECTURE.md section 5).
-	Prices []struct{} `json:"prices"`
+	// Prices are the legs this position is valued through, with the hops that produced each
+	// one. M3 shipped this field present and empty exactly so that filling it here would not
+	// change the shape a client parses (ARCHITECTURE.md section 5).
+	//
+	// It is the half of the audit trail the ledger cannot supply: the steps say what was
+	// traded, the path says what it is worth and how we got there. Multiplying a path's rates
+	// reproduces its price exactly, which is what makes it checkable rather than merely
+	// shown (K11, K17).
+	Prices []legPriceBody `json:"prices"`
+}
+
+// hopBody is one edge of a price path: what it converted, through which instrument, at what
+// rate, and whether that rate was the instrument's own or its reciprocal.
+type hopBody struct {
+	FromAsset    int64      `json:"from_asset_id"`
+	ToAsset      int64      `json:"to_asset_id"`
+	InstrumentID int64      `json:"instrument_id" doc:"zero when the leg was an assumed peg"`
+	Rate         string     `json:"rate"`
+	Inverted     bool       `json:"inverted"      doc:"the instrument quotes the other direction"`
+	Assumed      bool       `json:"assumed"       doc:"a peg, not a traded price (K17)"`
+	ObservedAt   *time.Time `json:"observed_at"`
+}
+
+type legPriceBody struct {
+	AssetID    int64      `json:"asset_id"`
+	PriceUSD   string     `json:"price_usd"`
+	AssumedPeg bool       `json:"assumed_peg"`
+	ObservedAt *time.Time `json:"observed_at"`
+	Path       []hopBody  `json:"path"`
 }
 
 type transactionsBody struct {
@@ -132,8 +159,7 @@ func (d Deps) registerLineage(api huma.API) {
 			return nil, huma.Error401Unauthorized("unauthorized")
 		}
 
-		lineage, err := portfolio.LoadLineage(ctx, d.DB, accountID, in.ID, in.Steps,
-			d.Now(), d.LeaseTTL, d.PriceTTL)
+		lineage, err := portfolio.LoadLineage(ctx, d.DB, accountID, in.ID, in.Steps, d.window())
 		switch {
 		case errors.Is(err, portfolio.ErrMalformedID):
 			return nil, huma.Error400BadRequest("malformed position id")
@@ -178,7 +204,7 @@ func (d Deps) registerLineage(api huma.API) {
 			Position:    renderPosition(lineage.Position),
 			Steps:       steps,
 			TotalEvents: lineage.TotalEvents,
-			Prices:      []struct{}{},
+			Prices:      renderPrices(lineage.Prices),
 		}}, nil
 	})
 
@@ -214,4 +240,34 @@ func (d Deps) registerLineage(api huma.API) {
 			NextCursor: page.NextCursor,
 		}}, nil
 	})
+}
+
+// renderPrices turns the run's legs into the response's audit block. Every number is a
+// string (L1), including the rates: a client parsing a hop into a float would reproduce the
+// path to within a rounding error, and "within a rounding error" is not a proof.
+func renderPrices(prices []valuation.RecordedPrice) []legPriceBody {
+	out := make([]legPriceBody, 0, len(prices))
+	for _, p := range prices {
+		leg := legPriceBody{
+			AssetID: p.AssetID, PriceUSD: p.USD.String(), AssumedPeg: p.AssumedPeg,
+			Path: make([]hopBody, 0, len(p.Path)),
+		}
+		if !p.ObservedAt.IsZero() {
+			observed := p.ObservedAt
+			leg.ObservedAt = &observed
+		}
+		for _, h := range p.Path {
+			hop := hopBody{
+				FromAsset: h.From, ToAsset: h.To, InstrumentID: h.InstrumentID,
+				Rate: h.Rate.String(), Inverted: h.Inverted, Assumed: h.Assumed,
+			}
+			if !h.ObservedAt.IsZero() {
+				observed := h.ObservedAt
+				hop.ObservedAt = &observed
+			}
+			leg.Path = append(leg.Path, hop)
+		}
+		out = append(out, leg)
+	}
+	return out
 }

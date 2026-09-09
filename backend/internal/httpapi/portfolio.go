@@ -8,6 +8,7 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/portfolio"
 	"github.com/Contictus/plimsoll/backend/internal/position"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -81,11 +82,16 @@ type quoteTotalBody struct {
 // how, and how old" -- and a client that can see the run can tell a moving market from a
 // moving price source.
 type valuationBody struct {
-	RunID            int64      `json:"run_id"`
-	AsOf             time.Time  `json:"as_of"`
-	Numeraire        string     `json:"numeraire"`
-	Source           string     `json:"price_source"`
-	AssumedPeg       bool       `json:"assumed_peg" doc:"a leg of this run assumed a peg rather than a traded price"`
+	RunID      int64     `json:"run_id"`
+	AsOf       time.Time `json:"as_of"`
+	Numeraire  string    `json:"numeraire"`
+	Source     string    `json:"price_source"`
+	AssumedPeg bool      `json:"assumed_peg" doc:"a leg of this run assumed a peg rather than a traded price"`
+
+	// Rebuilt says this run was reconstructed from price_ticks for a past instant rather
+	// than recorded when it happened (K48). A reader comparing the two is entitled to know
+	// which they have: one is what we said at the time, the other is what the ticks say now.
+	Rebuilt          bool       `json:"rebuilt"`
 	OldestObservedAt *time.Time `json:"oldest_observed_at" doc:"the age of the run's worst leg"`
 }
 
@@ -191,6 +197,7 @@ func renderValuation(r *portfolio.PriceRun) *valuationBody {
 	out := &valuationBody{
 		RunID: r.RunID, AsOf: r.AsOf, Numeraire: r.Numeraire,
 		Source: r.Source, AssumedPeg: r.AssumedPeg,
+		Rebuilt: r.RunID == valuation.EphemeralRunID,
 	}
 	if !r.OldestObservedAt.IsZero() {
 		observed := r.OldestObservedAt
@@ -211,7 +218,46 @@ func (d Deps) load(ctx context.Context) (portfolio.Portfolio, error) {
 	if !ok {
 		return portfolio.Portfolio{}, huma.Error401Unauthorized("unauthorized")
 	}
-	return portfolio.Load(ctx, d.DB, accountID, d.Now(), d.LeaseTTL, d.PriceTTL)
+	return portfolio.Load(ctx, d.DB, accountID, d.window())
+}
+
+// loadAt answers for a past instant by folding the ledger to it and rebuilding a run from
+// price_ticks. A future instant is refused rather than served: the honest answer would be
+// today's portfolio with tomorrow's timestamp on it, which is a claim we cannot make.
+func (d Deps) loadAt(ctx context.Context, at time.Time) (portfolio.Portfolio, error) {
+	accountID, ok := AccountFromContext(ctx)
+	if !ok {
+		return portfolio.Portfolio{}, huma.Error401Unauthorized("unauthorized")
+	}
+	w := d.window()
+	if at.After(w.Now) {
+		return portfolio.Portfolio{}, huma.Error400BadRequest("at is in the future")
+	}
+	return portfolio.LoadAt(ctx, d.DB, accountID, at.UTC(), w, d.PegAssets)
+}
+
+// window is the one place the API turns its configuration into the read model's, so two
+// endpoints cannot judge the same condition by two tolerances.
+func (d Deps) window() portfolio.Window {
+	return portfolio.Window{Now: d.Now(), LeaseTTL: d.LeaseTTL, PriceTTL: d.PriceTTL}
+}
+
+// portfolioInput carries the optional instant. Absent means now, which is the live
+// projection; present means the fold, and the two paths produce the same shape of body so a
+// client parses one thing.
+type portfolioInput struct {
+	At string `query:"at" doc:"RFC3339 instant; omit for the live portfolio"`
+}
+
+func (d Deps) portfolioFor(ctx context.Context, in *portfolioInput) (portfolio.Portfolio, error) {
+	if in == nil || in.At == "" {
+		return d.load(ctx)
+	}
+	at, err := time.Parse(time.RFC3339, in.At)
+	if err != nil {
+		return portfolio.Portfolio{}, huma.Error400BadRequest("at must be an RFC3339 instant")
+	}
+	return d.loadAt(ctx, at)
 }
 
 type positionInput struct {
@@ -226,8 +272,11 @@ func (d Deps) registerPortfolio(api huma.API) {
 		Method:      http.MethodGet,
 		Path:        "/portfolio",
 		Summary:     "Holdings, subtotals per quote asset, and what the numbers are missing",
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body portfolioBody }, error) {
-		p, err := d.load(ctx)
+		Description: "Without `at` this is the live projection. With `at` it is the ledger" +
+			" folded to that instant and priced from a run rebuilt out of price_ticks --" +
+			" never stored, and never reaching past a gap to a later price.",
+	}, func(ctx context.Context, in *portfolioInput) (*struct{ Body portfolioBody }, error) {
+		p, err := d.portfolioFor(ctx, in)
 		if err != nil {
 			return nil, err
 		}

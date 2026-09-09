@@ -735,6 +735,51 @@ which is not news, and a warning a reader learns to ignore is worse than no warn
 
 ---
 
+### K48 - A past answer is rebuilt, not stored, and is a pure function of its instant · `extends K11, K47`
+
+`GET /portfolio?at=T` folds the ledger to T and prices it from a run reconstructed out of
+`price_ticks`. The run is **not written**, and it does not need to be: the ledger is durable,
+the fold is pure and the price walk is pure, so the same T yields the same answer forever.
+Persisting one would grow a table by a row per curious click and add nothing an audit could
+not already reproduce.
+
+**Never reaching forward.** The prices come from the newest tick at or *before* T. A gap in
+the ticks around T therefore surfaces as an old `observed_at` -- reported as `price_stale` --
+and never as the next price after the gap. Reaching across a gap values the past with
+information nobody had at the time, and in a risk product that is the bug that makes a
+backtest look brilliant and a liquidation arrive unannounced. A future `at` is refused for
+the same reason wearing a friendlier costume.
+
+**The response carries no reason that is a fact about now.** `ingest_stalled` says no worker
+is reading an integration *at this moment*; a response about last Tuesday that carried it
+would be answering a question nobody asked, with a `since` that moves every time the same
+instant is requested. That is the one thing a reproducible answer cannot do, so the
+historical read carries only conditions that are properties of T -- and a client that wants
+the state of ingestion asks for the live portfolio, which is one request away.
+
+`projection_lagging` is absent for a different reason: this endpoint folds the ledger itself,
+so nothing can be behind it. The reason would be a lie rather than an irrelevance.
+
+**Two runs in one PnL response is what L10 protects, not a breach of it.** `GET /pnl?from&to`
+carries a run at each end. The law forbids one *number* built from two price sources; here
+realized comes from the ledger and needs no price at all, and every marked figure names the
+end it came from. An interval is two questions, and answering both from one instant's prices
+would be the actual error.
+
+**One thing a rebuilt run cannot promise, and says so.** Its peg set is today's configuration
+(K17). The response marks it `rebuilt: true` and keeps `assumed_peg`, so a reader comparing a
+reconstruction against a recorded run can tell which is which: one is what we said at the
+time, the other is what the ticks say now.
+
+**`GET /portfolio/history` is deliberately not shipped yet.** Its cost is N boundaries times a
+full fold of the account's history, and the plan made it conditional on a measurement rather
+than a guess. There is no real-sized ledger to measure against -- M2 is still waiting on a
+read-only key -- and timing a four-event fixture would be dressing an assumption up as
+evidence. It lands when there is a history worth folding, which is also when
+`position_snapshots` stops being anticipated and starts being necessary.
+
+---
+
 ---
 
 ---
