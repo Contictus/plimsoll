@@ -202,6 +202,25 @@ type Session struct {
 	LastSeenAt time.Time
 }
 
+type ValuationPrice struct {
+	RunID      int64
+	AssetID    int64
+	PriceUsd   decimal.Decimal
+	Path       []byte
+	AssumedPeg bool
+	ObservedAt *time.Time
+}
+
+type ValuationRun struct {
+	ID               int64
+	AsOf             time.Time
+	Numeraire        string
+	PriceSource      string
+	AssumedPeg       bool
+	OldestObservedAt *time.Time
+	CreatedAt        time.Time
+}
+
 type WorkerIntegration struct {
 	IntegrationID uuid.UUID
 	AccountID     uuid.UUID

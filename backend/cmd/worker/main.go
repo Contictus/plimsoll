@@ -127,6 +127,16 @@ func run(log *slog.Logger) error {
 		runPrices(ctx, pool, d.limiter, log)
 	}()
 
+	// Valuation runs go beside the feed rather than inside it: the feed's job is to record
+	// what things cost, and the run's is to turn that into one number per asset that every
+	// reader shares (K11). Separating them means a stalled feed produces ageing runs that
+	// say how old they are, instead of no runs at all.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runValuations(ctx, pool, log)
+	}()
+
 	for _, assignment := range assignments {
 		wg.Add(1)
 		go func() {

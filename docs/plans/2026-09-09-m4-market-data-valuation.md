@@ -240,14 +240,14 @@ Three reasons, and the third is the one that decides it:
    to design out, and doing it per-request would reintroduce it inside our own product.
 
 **Steps:**
-- [ ] **Step 1: Failing test — a run records every asset it priced, with its path.**
-- [ ] **Step 2: Failing test — a run with any assumed leg sets `assumed_peg` on the run.**
-- [ ] **Step 3: Failing test — the latest completed run is what a reader gets**, and a run
+- [x] **Step 1: Failing test — a run records every asset it priced, with its path.**
+- [x] **Step 2: Failing test — a run with any assumed leg sets `assumed_peg` on the run.**
+- [x] **Step 3: Failing test — the latest completed run is what a reader gets**, and a run
   still being written is never half-visible: prices and the run row commit together.
-- [ ] **Step 4: Migration, queries, generate.**
-- [ ] **Step 5: The producer**, on the same lease-guarded pattern the fold uses (K38) —
+- [x] **Step 4: Migration, queries, generate.**
+- [x] **Step 5: The producer**, on the same lease-guarded pattern the fold uses (K38) —
   one process values, and it is the one that already holds the write.
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ---
 
