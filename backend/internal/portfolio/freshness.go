@@ -9,19 +9,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// ValuationUnavailable is what a response carrying numbers says while M4 does not exist:
-// there is no total, only subtotals per quote asset. A response that merely omitted the
-// total would leave a client to guess whether the account is empty or nothing was priced.
+// ValuationUnavailable means no run has completed, and nothing weaker. M4 narrowed it from
+// "no price engine exists" to exactly this, and did not retire it: on a fresh install whose
+// feed has never connected there genuinely is no valuation, and a response that dropped the
+// reason would report a confident zero -- the failure the reason was written to prevent,
+// arriving through the door marked cleanup.
 //
-// Only responses that would otherwise carry a total raise it. A ledger listing values
-// nothing, and adding it there would be noise -- and noise in freshness erodes it exactly
-// as fast as silence does.
+// A warning and not an error: every number present is exact, and marking an exact response
+// unreliable erodes what status means just as surely as failing to mark a wrong one.
 func ValuationUnavailable(now time.Time) freshness.Reason {
 	return freshness.Reason{
 		Code:     freshness.ReasonValuationUnavailable,
 		Severity: freshness.SeverityWarn,
-		Detail: "no price source has run: totals are subtotals per quote asset, and nothing" +
-			" here is marked to market",
+		Detail: "no valuation run has completed: totals are subtotals per quote asset, and" +
+			" nothing here is marked to market",
 		Since: now,
 	}
 }
@@ -155,4 +156,50 @@ func UnattributedFees(
 		})
 	}
 	return out
+}
+
+// AssumedPeg discloses that a leg of the run fell back to a peg instead of a traded price
+// (K17). Info, not warn: the assumption is named, every other number is arithmetic on real
+// prices, and spending a warning on the ordinary case is how a client learns to ignore them.
+//
+// It is deliberately not conditional on whether the account holds the assumed asset. The
+// total is built from one run, and if that run leaned on an assumption anywhere the reader
+// is entitled to know before comparing it against an exchange screen.
+func AssumedPeg(since time.Time) freshness.Reason {
+	return freshness.Reason{
+		Code:     freshness.ReasonAssumedPeg,
+		Severity: freshness.SeverityInfo,
+		Detail: "a leg of this valuation assumed a stablecoin peg rather than a traded" +
+			" price, so the total carries that assumption",
+		Since: since,
+	}
+}
+
+// PriceStale reports the age of the run's worst leg. The worst and not the average: a total
+// is only as current as the oldest price inside it, and an average would hide one forgotten
+// instrument behind a hundred fresh ones.
+//
+// The total is still served. A stale price is an answer with a caveat; withholding it would
+// leave the reader with nothing, and silence is the worst possible failure (L11).
+func PriceStale(observedAt time.Time, age time.Duration) freshness.Reason {
+	return freshness.Reason{
+		Code:     freshness.ReasonPriceStale,
+		Severity: freshness.SeverityWarn,
+		Detail: fmt.Sprintf("the oldest price in this valuation is %s old; the total is"+
+			" marked to a market that has moved since", age.Round(time.Second)),
+		Since: observedAt,
+	}
+}
+
+// FeePriceMissing reports a fee paid in an asset the run could not price. The fee totals
+// stay exact and stay in their own asset (L9); what is missing is only the conversion, which
+// is why it warns rather than errors -- every other number in the response is intact.
+func FeePriceMissing(asset string, since time.Time) freshness.Reason {
+	return freshness.Reason{
+		Code:     freshness.ReasonFeePriceMissing,
+		Severity: freshness.SeverityWarn,
+		Detail: fmt.Sprintf("fees were paid in %s, which this valuation could not price, so"+
+			" they are reported in %s and are not in any total", asset, asset),
+		Since: since,
+	}
 }

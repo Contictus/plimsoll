@@ -25,7 +25,10 @@ import (
 
 var readAt = time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 
-const loadLeaseTTL = 2 * time.Minute
+const (
+	loadLeaseTTL = 2 * time.Minute
+	loadPriceTTL = 20 * time.Minute
+)
 
 func amount(s string) decimal.NullDecimal {
 	return decimal.NewNullDecimal(decimal.RequireFromString(s))
@@ -152,7 +155,7 @@ func TestLoadReadsTheFoldBackAsAPortfolio(t *testing.T) {
 	_, err := projection.Project(ctx, pool, accountID, integrationID)
 	require.NoError(t, err)
 
-	got, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL)
+	got, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL, loadPriceTTL)
 	require.NoError(t, err)
 
 	require.Len(t, got.Holdings, 2)
@@ -189,14 +192,14 @@ func TestAnUnfoldedEventMakesTheResponseSayTheProjectionIsBehind(t *testing.T) {
 	_, err := projection.Project(ctx, pool, accountID, integrationID)
 	require.NoError(t, err)
 
-	caughtUp, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL)
+	caughtUp, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL, loadPriceTTL)
 	require.NoError(t, err)
 	require.NotContains(t, reasonCodes(caughtUp.Freshness), freshness.ReasonProjectionLagging)
 
 	// One more event, deliberately not folded.
 	appendTrade(t, accountID, integrationID, instrumentID, 2, ledger.SideBuy, "1", "120", "", "")
 
-	behind, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL)
+	behind, err := portfolio.Load(ctx, pool, accountID, readAt, loadLeaseTTL, loadPriceTTL)
 	require.NoError(t, err)
 	require.Contains(t, reasonCodes(behind.Freshness), freshness.ReasonProjectionLagging)
 	require.Equal(t, "1", behind.Holdings[0].Quantity.String(),
@@ -211,7 +214,7 @@ func TestAnIntegrationWithNoEventsIsNotReportedAsLagging(t *testing.T) {
 	accountID := seedAccount(t)
 	seedIntegrationFor(t, accountID, "fresh")
 
-	got, err := portfolio.Load(ctx, appPool(t), accountID, readAt, loadLeaseTTL)
+	got, err := portfolio.Load(ctx, appPool(t), accountID, readAt, loadLeaseTTL, loadPriceTTL)
 	require.NoError(t, err)
 
 	require.NotContains(t, reasonCodes(got.Freshness), freshness.ReasonProjectionLagging)
@@ -238,7 +241,7 @@ func TestOneAccountsPortfolioNeverContainsAnothers(t *testing.T) {
 	_, err = projection.Project(ctx, pool, theirs, theirsIntegration)
 	require.NoError(t, err)
 
-	got, err := portfolio.Load(ctx, pool, mine, readAt, loadLeaseTTL)
+	got, err := portfolio.Load(ctx, pool, mine, readAt, loadLeaseTTL, loadPriceTTL)
 	require.NoError(t, err)
 
 	require.Len(t, got.Holdings, 1)

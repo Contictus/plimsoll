@@ -13,6 +13,50 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const listAccountFeeAssets = `-- name: ListAccountFeeAssets :many
+SELECT DISTINCT a.id, a.canonical_symbol
+FROM ledger_events e
+JOIN assets a ON a.id = e.fee_asset_id
+WHERE e.account_id = $1
+  AND e.fee_asset_id IS NOT NULL
+ORDER BY a.id
+`
+
+type ListAccountFeeAssetsRow struct {
+	ID              int64
+	CanonicalSymbol string
+}
+
+// Every asset this account has ever paid a fee in, as the id the fee was resolved to at
+// ingest -- never the venue string the fee arrived as (L8, K22). It is read so the response
+// can say fee_price_missing: a fee in an asset the run could not price leaves the fee
+// totals honest but unconvertible, and a reader adding them to a USD total would be adding
+// a number with no unit.
+//
+// The unresolved half of the same question is ListIntegrationsWithUnattributedFees, which
+// is why this one filters the id to NOT NULL rather than reporting both conditions as one:
+// an asset we do not know and an asset we cannot price are different faults with different
+// fixes.
+func (q *Queries) ListAccountFeeAssets(ctx context.Context, accountID uuid.UUID) ([]ListAccountFeeAssetsRow, error) {
+	rows, err := q.db.Query(ctx, listAccountFeeAssets, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountFeeAssetsRow{}
+	for rows.Next() {
+		var i ListAccountFeeAssetsRow
+		if err := rows.Scan(&i.ID, &i.CanonicalSymbol); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccountPositionFees = `-- name: ListAccountPositionFees :many
 SELECT integration_id, instrument_id, fee_asset, amount
 FROM position_fees
@@ -55,6 +99,7 @@ func (q *Queries) ListAccountPositionFees(ctx context.Context, accountID uuid.UU
 const listAccountPositions = `-- name: ListAccountPositions :many
 SELECT p.integration_id, p.instrument_id,
        i.canonical_symbol, i.kind,
+       i.base_asset_id, i.quote_asset_id,
        b.canonical_symbol AS base_asset,
        q.canonical_symbol AS quote_asset,
        p.quantity, p.avg_entry_price, p.realized_pnl, p.last_event_time
@@ -71,6 +116,8 @@ type ListAccountPositionsRow struct {
 	InstrumentID    int64
 	CanonicalSymbol string
 	Kind            string
+	BaseAssetID     int64
+	QuoteAssetID    int64
 	BaseAsset       string
 	QuoteAsset      string
 	Quantity        decimal.Decimal
@@ -100,6 +147,8 @@ func (q *Queries) ListAccountPositions(ctx context.Context, accountID uuid.UUID)
 			&i.InstrumentID,
 			&i.CanonicalSymbol,
 			&i.Kind,
+			&i.BaseAssetID,
+			&i.QuoteAssetID,
 			&i.BaseAsset,
 			&i.QuoteAsset,
 			&i.Quantity,

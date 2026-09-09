@@ -80,7 +80,7 @@ func LoadLineage(
 	id string,
 	steps int,
 	now time.Time,
-	leaseTTL time.Duration,
+	leaseTTL, priceTTL time.Duration,
 ) (Lineage, error) {
 	integrationID, instrumentID, err := ParsePositionID(id)
 	if err != nil {
@@ -95,7 +95,7 @@ func LoadLineage(
 
 	var out Lineage
 	err = tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
-		in, err := read(ctx, q, accountID, now, leaseTTL)
+		in, err := read(ctx, q, accountID, now, leaseTTL, priceTTL)
 		if err != nil {
 			return err
 		}
