@@ -346,7 +346,7 @@ Directories are created when the module is written, not in advance.
 | **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
 | **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** 🟡 | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
-| **M4** | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working |
+| **M4** ✅ | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working. `GET /pnl` and the lineage price paths shipped with it; `GET /portfolio/history` deliberately deferred (K48) |
 | **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
 | **M6** | Strategy + risk + alerting | Strategy-level net delta; thresholds with hysteresis and cooldown; Telegram/webhook; SSE; dashboard v1 |
 | **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
@@ -413,13 +413,20 @@ it and appear in every portfolio response:
 | Negative-balance check running | **done** — `negative_balance`, severity `error`, one reason per asset, and it goes quiet when the deposits pay for the fills |
 | Unknown-symbol check running | **done** — a fee in an uncurated ticker raises `unknown_symbol` and the shortfall is exactly that fee (K45) |
 | Gap check running | **done since M2** — `ws_gap` from the published worker state (K39) |
-| A spot ↔ futures transfer is not counted as a sale | **not started** — `transfer_links` and the matching heuristic (K12) |
+| A spot ↔ futures transfer is not counted as a sale | **planned, venue verified** — `docs/plans/2026-09-09-m35-transfers.md` |
 
-The transfer half is deliberately last: nothing produces a `TRANSFER` event yet, because
-Binance reports an intra-venue move through the universal-transfer endpoint and V1 ingests
-spot only. The balance engine already fixes the convention that normalizer must honour — a
-transfer's quantity is **signed**, positive in and negative out — and enforces it with a
-test, so the fold is waiting rather than undefined.
+The transfer half was left until last because nothing produces a `TRANSFER` event yet:
+Binance reports an intra-venue move through the wallet endpoint rather than through the spot
+stream, and V1 ingests spot. Verifying that endpoint before planning changed the plan (F10):
+it returns **one row per transfer** with the direction in its `type`, so there are no two
+halves to match. K12's heuristic is what a venue that reports them separately needs, which is
+cross-venue and stays in M8; `transfer_links` is not built here.
+
+It also changed the convention the balance engine was holding. A transfer's quantity was to
+be signed, positive in and negative out; with both endpoints named on the event the sign is
+redundant, and a move between two wallets of one integration folds to **no delta at all** —
+the account holds what it held. The signed branch survives for the `external` side, which is
+what M8 turns on.
 
 **M0 comes first because tenancy cannot be retrofitted.** Adding `account_id` and RLS to
 a schema that already holds a real ledger means rebuilding every table.

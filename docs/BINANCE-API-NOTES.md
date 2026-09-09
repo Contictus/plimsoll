@@ -469,3 +469,88 @@ minutes, so a year of one symbol is roughly 530 calls at weight 2.
 - Reference price streams (`<symbol>@referencePrice`) exist and are per-symbol only, with a
   `null` documented when no reference price is available. Not used: there is no all-market
   form, and one subscription per symbol is the design F7's snapshot exists to avoid.
+
+---
+
+## 7. Intra-venue transfers (M3.5)
+
+Read on **2026-09-09** against `developers.binance.com`. Everything below is quoted from a
+page that was actually opened; where a value could not be found on the page, that is stated
+rather than filled in from a plausible memory.
+
+### F10 — One row is one transfer, and the direction is in its `type`
+
+`GET /sapi/v1/asset/transfer` — *Query User Universal Transfer History*, weight **1** (IP).
+
+`type` is a **required** parameter, and it is a direction rather than a category: the 32
+documented values are ordered pairs — `MAIN_UMFUTURE` and `UMFUTURE_MAIN` are two different
+queries. So "every transfer this account made" is not one call; it is one call per direction
+you care about.
+
+The response is a page of rows:
+
+```json
+{ "total": 2, "rows": [
+  { "asset": "USDT", "amount": "1", "type": "MAIN_UMFUTURE",
+    "status": "CONFIRMED", "tranId": 11415955596, "timestamp": 1544433328000 } ] }
+```
+
+**One row per transfer, carrying both endpoints.** This is the finding that reshapes M3.5.
+K12's matching heuristic — same asset and amount within fee tolerance, inside a time window,
+`txid` when available — exists because a venue can report the two halves of a movement
+separately and leave the joining to the reader. Here it does not: the row *is* the movement,
+and both wallets are named by `type`. Intra-venue transfer matching is therefore not a
+heuristic problem at all, and building a manual-resolution queue for it would be building a
+UI for a problem this endpoint does not have. The heuristic is still needed cross-venue,
+which is M8.
+
+Paging is `current` (1-based) and `size` (**max 100**, default 10) with `total` returned —
+offset paging, not keyset. Offset paging over a table that receives new rows shifts pages
+under the reader, so the walk is windowed by `startTime`/`endTime` rather than trusted to
+stay still.
+
+Quoted, on range: *"Support query within the last 6 months only. If startTime and endTime not
+sent, return records of the last 7 days by default"*. Six months, not three (futures income)
+and not unbounded (spot trades) — a third horizon, and the backfill's history-truncated
+boundary for this scope.
+
+### F11 — The status enum is not published
+
+The page shows `status` as a string and gives exactly one value, `"CONFIRMED"`, in the
+response example. It **does not enumerate** the possible values anywhere. A web search
+returns "CONFIRMED / FAILED / PENDING" — from search-result text, not from the page, which is
+not a source this project encodes into append-only financial rows (`CLAUDE.md` §2).
+
+The consequence is a whitelist rather than a blacklist: `CONFIRMED` is recorded and every
+other value is refused loudly. The failure mode of guessing wrong here is smaller than for
+withdrawals (§5) — an intra-venue transfer nets to zero on the account's balance either way —
+but "smaller" is not "absent": a `PENDING` row recorded as complete misstates which wallet
+holds the money, which is exactly the question M5 asks.
+
+### F12 — The same movement is reported twice, by two endpoints
+
+A spot → USD-M transfer appears **both** as a `MAIN_UMFUTURE` row in universal-transfer
+history **and** as an `incomeType: TRANSFER` row in `GET /fapi/v1/income` (weight 30,
+*"Income history only contains data for the last three months"*).
+
+This is a double-count trap wearing the costume of thoroughness. M5 ingests futures income
+for funding and realized PnL, and folding its `TRANSFER` rows as balance changes as well
+would move the money twice. Recorded here, before the code that would do it exists: the
+futures income normalizer must skip `TRANSFER` and say why, because the wallet endpoint has
+already reported it.
+
+### F13 — Identity includes the type, not only the `tranId`
+
+`tranId` is an int64 per row. F3 already found that on futures income it is unique per
+`incomeType` rather than globally; nothing on this page claims a stronger guarantee for
+transfers. Identity is therefore `transfer:<type>:<tranId>` — the same shape as every other
+venue event id, and one that cannot collide across two directions even if the venue reuses a
+number between them (L5).
+
+### Still unverified for M3.5
+
+- The status values other than `CONFIRMED`. Whitelisted rather than guessed (F11).
+- Whether a transfer can carry a fee. No fee field appears in the row, and none is documented;
+  if one exists it would arrive in `raw` (L15) and the fold would need L9 applied to it.
+- Whether `tranId` is globally unique across transfer types. Assumed not, which is the safe
+  direction: a wider identity cannot merge two transfers, a narrower one can.
