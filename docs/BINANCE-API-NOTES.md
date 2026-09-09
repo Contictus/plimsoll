@@ -19,6 +19,8 @@ and two of the facts below already contradict what the ecosystem still documents
 | USD-M position risk | https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Position-Information-V3 |
 | Wallet deposits | https://developers.binance.com/docs/wallet/capital/deposite-history |
 | API key permission | https://developers.binance.com/docs/wallet/account/api-key-permission |
+| Spot market streams | https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams |
+| Spot market data REST | https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints |
 
 ---
 
@@ -340,3 +342,130 @@ Recorded so the M2 plan does not quietly assume them:
 - Whether the spot WS API subscription expires, and what keeps it alive.
 - SBE versus JSON. SBE is offered; JSON is the one whose payload we can store verbatim in
   `raw` and read six months later (L15), which is an argument on its own.
+
+---
+
+## 6. Market data (M4)
+
+**Verified against the official documentation on 2026-09-09**, from the same repository
+that backs `developers.binance.com`:
+`raw.githubusercontent.com/binance/binance-spot-api-docs/master/{web-socket-streams,rest-api}.md`.
+
+### F6 — Market data needs no key, and there is an endpoint that cannot carry account data
+
+This is the finding the M4 plan rests on, so it was checked two ways rather than one.
+
+**By rule.** `rest-api.md` §Request Security: *"If unspecified, the security type is
+`NONE`."* and the table reads *"`NONE` — Public market data"*. Neither
+`### Symbol price ticker` nor `### Kline/Candlestick data` carries a security type in its
+heading, so both are `NONE`: no `X-MBX-APIKEY`, no signature.
+
+**By construction.** `web-socket-streams.md` §General WSS information:
+
+> The base endpoint **wss://data-stream.binance.vision** can be subscribed to receive
+> **only** market data messages. User data stream is **NOT** available from this URL.
+
+That is stronger than a convention. Connecting the price feed there makes "this connection
+cannot carry account data" a property of the transport rather than a promise the code
+keeps, which is the same reasoning that puts the ledger's append-only rule in a `GRANT`
+rather than in a code review (L2).
+
+**Consequence for the milestone order:** M4 is not blocked behind M2. M2 cannot close
+without a real read-only key, because its exit criterion is real account history. Prices
+are the same for every account, so M4 can be built and verified today.
+
+### F7 — `!miniTicker@arr` omits what did not change, so the stream is never a snapshot
+
+`web-socket-streams.md` §All Market Mini Tickers Stream:
+
+> 24hr rolling window mini-ticker statistics for all symbols that changed in an array.
+> **Note that only tickers that have changed will be present in the array.**
+
+A symbol absent from a push has **not** lost its price — it has not traded in that second.
+Treating absence as "no price" would blank the valuation of every thinly traded asset the
+account holds, one second at a time, and the total would flicker for a reason no lineage
+could explain.
+
+Two design consequences, both in the M4 plan:
+
+- A **REST snapshot on start** is mandatory, not an optimisation. Without it the feed has
+  no price for anything until that symbol happens to trade.
+- The recorder holds a last-known price per instrument and only writes a `price_ticks` row
+  when a push actually names the symbol. The *age* of that price is then real, and
+  `price_stale` (L11) is computed from it rather than from when we last looked.
+
+| | |
+|---|---|
+| Stream name | `!miniTicker@arr` |
+| Update speed | `1000ms` |
+| Event type | `24hrMiniTicker` |
+| Last price field | `c` ("Close price"), a **string** — parsed with `decimal`, never a float (L1) |
+
+**The `"e"` / `"E"` trap applies here too.** The payload carries both `"e"` (event type,
+string) and `"E"` (event time, number), and `encoding/json` falls back to case-insensitive
+matching when no exact tag matches. This bit the normalizer once and the stream ingester
+once; the market-data decoder reads by exact key from `map[string]json.RawMessage` for the
+same reason.
+
+### F8 — The market stream's lifetime and keepalive, quoted
+
+`web-socket-streams.md` §General WSS information and §WebSocket Limits:
+
+> A single connection to **stream.binance.com** is only valid for 24 hours; expect to be
+> disconnected at the 24 hour mark.
+
+> The WebSocket server will send a `ping frame` every 20 seconds. If the WebSocket server
+> does not receive a `pong frame` back from the connection within a minute the connection
+> will be disconnected. When you receive a ping, you must send a pong with a copy of ping's
+> payload as soon as possible.
+
+> A single connection can listen to a maximum of 1024 streams.
+
+> There is a limit of **300 connections per attempt every 5 minutes per IP**.
+
+> WebSocket connections have a limit of 5 incoming messages per second.
+
+The 24-hour ceiling matches spot user data (F1), and the two are still verified separately:
+they are different services and a shared number today is a coincidence, not a contract.
+
+There is also an explicit warning shot, which the user-data stream has no equivalent of:
+
+> `serverShutdown` event is sent when the server is about to shut down.
+
+That is worth handling rather than waiting for the socket to drop — it turns a gap the
+recorder has to detect into one it is told about in advance.
+
+**One connection is enough.** `!miniTicker@arr` is a single stream, so the 1024 ceiling is
+irrelevant and the 300-connections-per-5-minutes limit only binds a reconnect storm.
+Prices are not per account: the feed belongs to the process, never to an integration, or an
+IP-wide budget would be multiplied by the number of users (K24).
+
+### F9 — The two REST endpoints, with their weights
+
+| Endpoint | Purpose | Weight | Notes |
+|---|---|---|---|
+| `GET /api/v3/ticker/price` | Snapshot of every symbol in one call | **4** with `symbol` omitted | *"If neither parameter is sent, prices for all symbols will be returned in an array."* Weight 2 for a single symbol, so asking for all of them is **cheaper than asking for three**. |
+| `GET /api/v3/klines` | Historical price at a past instant | **2** | `interval=1m` is supported; `limit` default 500, **maximum 1000**; *"`startTime` and `endTime` are always interpreted in UTC"* |
+
+`/api/v3/ticker/price` at weight 4 for the whole market is what makes the start-up snapshot
+and the post-gap refill affordable against the shared per-IP budget the account workers are
+already spending (K24).
+
+`klines` at `1m` is exactly the resolution K7 chose for `price_ticks`, which means a
+historical backfill and the live recorder write the same shape of row and `?at=` cannot
+tell which one filled a given minute. 1000 rows per call is a little under 17 hours of
+minutes, so a year of one symbol is roughly 530 calls at weight 2.
+
+### Still unverified for M4
+
+- **How far back `klines` actually serves.** The documentation states no floor. It is not
+  worth guessing: the historical backfill asks for the oldest window it wants and records
+  what it gets, raising `history_truncated` (the permanent one, not `backfill_incomplete`)
+  if the venue answers from a later date than requested.
+- **Whether `wss://data-stream.binance.vision` carries the same 24-hour ceiling and ping
+  contract as `stream.binance.com`.** The quoted lifetime names `stream.binance.com`
+  specifically. The recorder therefore treats the ceiling as applying and reconnects on its
+  own schedule regardless — being early costs one reconnect, being late costs a gap.
+- Reference price streams (`<symbol>@referencePrice`) exist and are per-symbol only, with a
+  `null` documented when no reference price is available. Not used: there is no all-market
+  form, and one subscription per symbol is the design F7's snapshot exists to avoid.
