@@ -346,7 +346,7 @@ Directories are created when the module is written, not in advance.
 | **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
 | **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** 🟡 | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
-| **M4** | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working |
+| **M4** ✅ | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working. `GET /pnl` and the lineage price paths shipped with it; `GET /portfolio/history` deliberately deferred (K48) |
 | **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
 | **M6** | Strategy + risk + alerting | Strategy-level net delta; thresholds with hysteresis and cooldown; Telegram/webhook; SSE; dashboard v1 |
 | **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
