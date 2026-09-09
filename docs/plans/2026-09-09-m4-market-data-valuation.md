@@ -196,19 +196,19 @@ product claim applied to the half M3 could not reach.
   one second ago routed through a USDC rate from an hour ago is an hour-old number.
 
 **Steps:**
-- [ ] **Step 1: Failing test — a direct pair prices in one hop** and records it.
-- [ ] **Step 2: Failing test — a two-hop path multiplies the legs** and records both.
-- [ ] **Step 3: Failing test — an inverted pair is used correctly.** If only `BTCUSDT`
+- [x] **Step 1: Failing test — a direct pair prices in one hop** and records it.
+- [x] **Step 2: Failing test — a two-hop path multiplies the legs** and records both.
+- [x] **Step 3: Failing test — an inverted pair is used correctly.** If only `BTCUSDT`
   exists, pricing USDT in BTC divides rather than multiplies, and a sign error here is a
   total that is wrong by orders of magnitude while looking plausible.
-- [ ] **Step 4: Failing test — the peg hop sets `AssumedPeg` and is in the path.**
+- [x] **Step 4: Failing test — the peg hop sets `AssumedPeg` and is in the path.**
   A stablecoin with a real market must be **priced, not pegged**: the assumed hop is the
   last resort, and a test proves the real rate wins when one exists (K17).
-- [ ] **Step 5: Failing test — an asset with no route is an error, not zero.**
+- [x] **Step 5: Failing test — an asset with no route is an error, not zero.**
   Zero is a number a dashboard will happily add up. `unknown_symbol` / no-route must reach
   the caller as a refusal.
-- [ ] **Step 6: Failing test — the path is stable across runs** with the same inputs.
-- [ ] **Step 7: Implement, then commit.**
+- [x] **Step 6: Failing test — the path is stable across runs** with the same inputs.
+- [x] **Step 7: Implement, then commit.**
 
 ---
 
