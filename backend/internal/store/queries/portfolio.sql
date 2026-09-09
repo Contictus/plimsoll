@@ -8,6 +8,7 @@
 -- already answered correctly.
 SELECT p.integration_id, p.instrument_id,
        i.canonical_symbol, i.kind,
+       i.base_asset_id, i.quote_asset_id,
        b.canonical_symbol AS base_asset,
        q.canonical_symbol AS quote_asset,
        p.quantity, p.avg_entry_price, p.realized_pnl, p.last_event_time
@@ -49,3 +50,21 @@ WHERE i.account_id = sqlc.arg(account_id)
               (c.last_event_time, c.last_venue_sequence, c.last_venue_event_id))
   )
 ORDER BY i.id;
+
+-- name: ListAccountFeeAssets :many
+-- Every asset this account has ever paid a fee in, as the id the fee was resolved to at
+-- ingest -- never the venue string the fee arrived as (L8, K22). It is read so the response
+-- can say fee_price_missing: a fee in an asset the run could not price leaves the fee
+-- totals honest but unconvertible, and a reader adding them to a USD total would be adding
+-- a number with no unit.
+--
+-- The unresolved half of the same question is ListIntegrationsWithUnattributedFees, which
+-- is why this one filters the id to NOT NULL rather than reporting both conditions as one:
+-- an asset we do not know and an asset we cannot price are different faults with different
+-- fixes.
+SELECT DISTINCT a.id, a.canonical_symbol
+FROM ledger_events e
+JOIN assets a ON a.id = e.fee_asset_id
+WHERE e.account_id = sqlc.arg(account_id)
+  AND e.fee_asset_id IS NOT NULL
+ORDER BY a.id;

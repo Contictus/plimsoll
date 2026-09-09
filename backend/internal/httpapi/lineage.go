@@ -133,7 +133,7 @@ func (d Deps) registerLineage(api huma.API) {
 		}
 
 		lineage, err := portfolio.LoadLineage(ctx, d.DB, accountID, in.ID, in.Steps,
-			d.Now(), d.LeaseTTL)
+			d.Now(), d.LeaseTTL, d.PriceTTL)
 		switch {
 		case errors.Is(err, portfolio.ErrMalformedID):
 			return nil, huma.Error400BadRequest("malformed position id")

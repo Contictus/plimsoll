@@ -2,14 +2,15 @@ package portfolio
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/google/uuid"
 )
 
@@ -20,19 +21,19 @@ import (
 // after the status that describes it -- and "one response, one consistent view" is the same
 // rule that makes a valuation run singular (K11, L10).
 //
-// now and leaseTTL are parameters rather than a clock and a constant, so the freshness
-// ranking is testable without waiting for anything (L4).
+// now, leaseTTL and priceTTL are parameters rather than a clock and two constants, so the
+// freshness ranking is testable without waiting for anything (L4).
 func Load(
 	ctx context.Context,
 	db tenancy.Beginner,
 	accountID uuid.UUID,
 	now time.Time,
-	leaseTTL time.Duration,
+	leaseTTL, priceTTL time.Duration,
 ) (Portfolio, error) {
 	var in Input
 	err := tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
 		var err error
-		in, err = read(ctx, q, accountID, now, leaseTTL)
+		in, err = read(ctx, q, accountID, now, leaseTTL, priceTTL)
 		return err
 	})
 	if err != nil {
@@ -49,7 +50,7 @@ func read(
 	q *store.Queries,
 	accountID uuid.UUID,
 	now time.Time,
-	leaseTTL time.Duration,
+	leaseTTL, priceTTL time.Duration,
 ) (Input, error) {
 	rows, err := q.ListAccountPositions(ctx, accountID)
 	if err != nil {
@@ -74,6 +75,28 @@ func read(
 	unattributedIDs, err := q.ListIntegrationsWithUnattributedFees(ctx, accountID)
 	if err != nil {
 		return Input{}, fmt.Errorf("portfolio: read unattributed fees for %s: %w", accountID, err)
+	}
+	feeAssetRows, err := q.ListAccountFeeAssets(ctx, accountID)
+	if err != nil {
+		return Input{}, fmt.Errorf("portfolio: read fee assets for %s: %w", accountID, err)
+	}
+
+	// One run, read inside the same transaction as everything else, so the prices and the
+	// quantities they multiply are one consistent view (K11, L10). A missing run is not an
+	// error: it is a portfolio without a total, and Build says so.
+	var priced *valuation.Run
+	run, err := valuation.LatestRun(ctx, q, now)
+	switch {
+	case err == nil:
+		priced = &run
+	case errors.Is(err, valuation.ErrNoRun):
+	default:
+		return Input{}, fmt.Errorf("portfolio: read valuation for %s: %w", accountID, err)
+	}
+
+	feeAssets := make([]FeeAsset, 0, len(feeAssetRows))
+	for _, f := range feeAssetRows {
+		feeAssets = append(feeAssets, FeeAsset{ID: f.ID, Symbol: f.CanonicalSymbol})
 	}
 
 	// Keyed by the projection's own key, so a fee cannot be attached to the wrong
@@ -115,6 +138,8 @@ func read(
 			InstrumentID:  r.InstrumentID,
 			Symbol:        r.CanonicalSymbol,
 			Kind:          r.Kind,
+			BaseAssetID:   r.BaseAssetID,
+			QuoteAssetID:  r.QuoteAssetID,
 			BaseAsset:     r.BaseAsset,
 			QuoteAsset:    r.QuoteAsset,
 			Quantity:      r.Quantity,
@@ -128,8 +153,9 @@ func read(
 	// Ordered worst-cause first is not the point -- freshness.New ranks severity itself.
 	// What matters is that every source of doubt is here, so a reader that trusts `status`
 	// is trusting all of them at once (L11).
-	reasons := []freshness.Reason{ValuationUnavailable(now)}
-	reasons = append(reasons, ReasonsFor(statuses, lagging, now, leaseTTL)...)
+	// The valuation's own reasons are not here: Build raises them, because whether a total
+	// exists at all is something only the marking-to-market knows.
+	reasons := ReasonsFor(statuses, lagging, now, leaseTTL)
 	reasons = append(reasons, NegativeBalances(balances)...)
 	reasons = append(reasons, UnattributedFees(statuses, unattributed, now)...)
 
@@ -138,5 +164,8 @@ func read(
 		Positions: positions,
 		Balances:  balances,
 		Reasons:   reasons,
+		Valuation: priced,
+		FeeAssets: feeAssets,
+		PriceTTL:  priceTTL,
 	}, nil
 }

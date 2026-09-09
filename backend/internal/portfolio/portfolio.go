@@ -16,6 +16,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/position"
+	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -37,6 +38,13 @@ type Position struct {
 	BaseAsset  string
 	QuoteAsset string
 
+	// BaseAssetID and QuoteAssetID are what a valuation run is keyed by. They are carried
+	// alongside the symbols rather than resolved from them: a symbol is a label a reader
+	// recognises, and looking an asset up by one here would be resolving today's mapping
+	// against a position folded from events with their own event_time (L8).
+	BaseAssetID  int64
+	QuoteAssetID int64
+
 	Quantity      decimal.Decimal
 	AvgEntryPrice decimal.Decimal
 	RealizedPnL   decimal.Decimal
@@ -57,6 +65,17 @@ type Holding struct {
 	// exposure too, and a signed cost basis would shrink as the account took on more risk.
 	CostBasis decimal.Decimal
 
+	// MarketValue is the position marked to market in the run's numeraire, signed: a short's
+	// is negative, because it is exposure owed rather than money held. Invalid when the base
+	// asset had no route to the numeraire -- absent, never zero, because a price we do not
+	// have and a price of zero are different claims (L1).
+	MarketValue decimal.NullDecimal
+
+	// UnrealizedPnL is MarketValue less what the position cost, both converted at the same
+	// run. Invalid unless both legs were priced: converting one leg at this run and the
+	// other at anything else is the "every screen shows a different total" failure (L10).
+	UnrealizedPnL decimal.NullDecimal
+
 	// Flat means the quantity is zero: a closed position, kept because its realized PnL and
 	// its fees are still the account's. Dropping it would lose them; hiding the flag would
 	// fill a dashboard with rows the user closed months ago.
@@ -72,6 +91,12 @@ type Balance struct {
 	Asset         string
 	Quantity      decimal.Decimal
 	LastEventTime time.Time
+
+	// PriceUSD and ValueUSD come from the response's one valuation run. Both are invalid
+	// when the run had no route to this asset, which is reported rather than rounded to
+	// zero: a holding nobody could price is not a holding worth nothing.
+	PriceUSD decimal.NullDecimal
+	ValueUSD decimal.NullDecimal
 
 	// Negative means the ledger implies holding less than nothing, which cannot be true of
 	// an exchange account. It is surfaced as a field and as a freshness reason: the field
@@ -91,10 +116,27 @@ type QuoteTotal struct {
 // Input is everything Build needs. Reasons are gathered by the caller, which is the only
 // part that has to touch the database.
 type Input struct {
+	// AsOf is when the account was read. It is not necessarily the portfolio's as_of: once
+	// a run backs the response that comes from the run, and this stays the read time, which
+	// is what price staleness is measured against.
 	AsOf      time.Time
 	Positions []Position
 	Balances  []Balance
 	Reasons   []freshness.Reason
+
+	// Valuation is the one run every number in this response is priced from, or nil when no
+	// run has completed. One run per response, never two (K11, L10).
+	Valuation *valuation.Run
+
+	// FeeAssets are the assets this account has paid fees in, so a fee the run cannot
+	// express in the numeraire is disclosed rather than left for a reader to add up into a
+	// number with no unit (L9).
+	FeeAssets []FeeAsset
+
+	// PriceTTL is how old the run's worst leg may be before the response says so. A
+	// parameter rather than a constant because "stale" is a product decision, and one this
+	// package must be able to test without waiting (L4).
+	PriceTTL time.Duration
 }
 
 // Portfolio is one account's holdings as of one instant.
@@ -108,6 +150,19 @@ type Portfolio struct {
 	ByQuote   []QuoteTotal
 	Fees      []position.FeeTotal
 	Freshness freshness.Report
+
+	// TotalValueUSD is the sum of the valued balances, and invalid when no run backs the
+	// response. It excludes anything in Unpriced -- which is why Unpriced is part of the
+	// answer and not a footnote: "worth X" and "worth X, minus the part we could not price"
+	// are different sentences and only one of them is true.
+	TotalValueUSD decimal.NullDecimal
+
+	// Unpriced names every asset held in a non-zero quantity that the run could not route
+	// to the numeraire, sorted so two reads compare.
+	Unpriced []string
+
+	// Prices is the run this response was built from, nil when there is none.
+	Prices *PriceRun
 }
 
 // Build derives the holdings, the per-quote subtotals and the portfolio-wide fee totals.
@@ -117,12 +172,12 @@ type Portfolio struct {
 // something.
 func Build(in Input) Portfolio {
 	out := Portfolio{
-		AsOf:      in.AsOf,
-		Holdings:  make([]Holding, 0, len(in.Positions)),
-		Balances:  make([]Balance, 0, len(in.Balances)),
-		ByQuote:   make([]QuoteTotal, 0),
-		Fees:      make([]position.FeeTotal, 0),
-		Freshness: freshness.New(in.Reasons...),
+		AsOf:     in.AsOf,
+		Holdings: make([]Holding, 0, len(in.Positions)),
+		Balances: make([]Balance, 0, len(in.Balances)),
+		ByQuote:  make([]QuoteTotal, 0),
+		Fees:     make([]position.FeeTotal, 0),
+		Unpriced: make([]string, 0),
 	}
 
 	for _, b := range in.Balances {
@@ -181,5 +236,14 @@ func Build(in Input) Portfolio {
 		}
 		return a.InstrumentID < b.InstrumentID
 	})
+
+	// Valuation runs last, over the sorted slices, so what it marks is what the response
+	// serves in the order the response serves it. Its reasons join the caller's rather than
+	// replacing them: a stale price and a stalled ingest are both true at once, and a reader
+	// who acts on only one of them has been told half the story (L11).
+	reasons := make([]freshness.Reason, 0, len(in.Reasons)+4)
+	reasons = append(reasons, in.Reasons...)
+	reasons = append(reasons, value(&out, in)...)
+	out.Freshness = freshness.New(reasons...)
 	return out
 }

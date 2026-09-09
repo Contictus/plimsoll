@@ -28,7 +28,8 @@ import (
 // that impossible is to never send a number.
 var moneyFields = map[string]bool{
 	"quantity": true, "avg_entry_price": true, "cost_basis": true,
-	"realized_pnl": true, "amount": true,
+	"realized_pnl": true, "amount": true, "market_value": true, "unrealized_pnl": true,
+	"price_usd": true, "value_usd": true, "total_value_usd": true,
 }
 
 // requireMoneyIsString walks the decoded response and fails on any money field that is not
@@ -196,20 +197,31 @@ func TestPortfolioReportsTheFoldedPositionWithSubtotalsPerQuoteAsset(t *testing.
 	require.Equal(t, "600", subtotals[0].(map[string]any)["cost_basis"])
 }
 
-// There is no total in this response, and there must not be one until a valuation run backs
-// it (K11, L10). A client that finds no total and no explanation would reasonably guess the
-// account is empty, so the absence is stated rather than implied.
+// A run whose prices cover none of what this account holds serves no total, and says why.
+// The property is asserted here rather than "no run exists at all": a valuation run belongs
+// to no account (00019), so any other test in this database producing one would make that
+// version of this test pass or fail depending on the order the suite happened to run in.
+//
+// A client that found a bare 0 here would reasonably read it as an empty account, which is
+// the confident-and-wrong answer the envelope exists to refuse (K11, L10, L11).
 func TestPortfolioCarriesNoTotalAndSaysWhy(t *testing.T) {
 	srv := newServer(t)
 	cookie := register(t, srv, uniqueEmail("no-total"))
 	accountID := accountOf(t, srv, cookie)
 	seedFoldedPosition(t, accountID)
 
+	// A run this account's assets are not in: the peg belongs to somebody else's pair, and
+	// nothing prices the assets seeded above.
+	otherInstrument, _, _ := seedPair(t)
+	produceRun(t, quoteAssetOf(t, otherInstrument), time.Now().UTC())
+
 	body := decodeJSON(t, do(t, http.MethodGet, srv.URL+"/portfolio", cookie))
 
-	for _, banned := range []string{"total", "total_value", "total_value_usd", "equity"} {
+	require.Equal(t, "", body["total_value_usd"],
+		"nothing here could be priced, so there is no total -- and never a zero")
+	for _, banned := range []string{"total", "total_value", "equity"} {
 		_, present := body[banned]
-		require.False(t, present, "%s must not exist before a valuation run does", banned)
+		require.False(t, present, "%s is not a field this API has", banned)
 	}
 
 	fresh := body["freshness"].(map[string]any)
@@ -217,8 +229,9 @@ func TestPortfolioCarriesNoTotalAndSaysWhy(t *testing.T) {
 	for _, r := range fresh["reasons"].([]any) {
 		codes = append(codes, r.(map[string]any)["code"].(string))
 	}
-	require.Contains(t, codes, "valuation_unavailable")
-	require.Contains(t, []any{"degraded", "unreliable"}, fresh["status"])
+	require.Contains(t, codes, "unknown_symbol",
+		"an asset with no route to the numeraire is named, not dropped")
+	require.Equal(t, "unreliable", fresh["status"])
 	require.NotEmpty(t, body["as_of"], "every data response carries as_of (L10)")
 }
 

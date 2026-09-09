@@ -40,12 +40,24 @@ type Deps struct {
 	// longer holds the integration, and "live, as of forty minutes ago" is the sentence the
 	// freshness object exists to keep out of a response (K39).
 	LeaseTTL time.Duration
+
+	// PriceTTL is how old the oldest price inside a valuation run may be before a response
+	// says so. It is sized by how the prices are produced rather than by how fast a market
+	// moves: the stream only reports tickers that changed (F7), so a quiet instrument's age
+	// is bounded by the worker's REST re-snapshot and not by its own trading. Tripping this
+	// therefore means the snapshot loop has stopped, which is worth a warning; a tighter
+	// value would only report that some listed pair is quiet, which is not news.
+	PriceTTL time.Duration
 }
 
 // defaultLeaseTTL matches cmd/worker's. Duplicated rather than shared because the two
 // processes are deployed separately and may briefly disagree; the consequence of a stale
 // value here is a status believed a little too long or too briefly, never a wrong number.
 const defaultLeaseTTL = 2 * time.Minute
+
+// defaultPriceTTL allows one re-snapshot interval (15 minutes, cmd/worker) plus the slack
+// for a run to be produced and read.
+const defaultPriceTTL = 20 * time.Minute
 
 // NewRouter builds the HTTP surface. Every operation is behind requireSession unless it
 // declares itself public, so the failure mode of forgetting to think about auth is a 401,
@@ -56,6 +68,9 @@ const defaultLeaseTTL = 2 * time.Minute
 func NewRouter(d Deps) http.Handler {
 	if d.LeaseTTL <= 0 {
 		d.LeaseTTL = defaultLeaseTTL
+	}
+	if d.PriceTTL <= 0 {
+		d.PriceTTL = defaultPriceTTL
 	}
 	router := chi.NewMux()
 	api := humachi.New(router, huma.DefaultConfig("Plimsoll", APIVersion))

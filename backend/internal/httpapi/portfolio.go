@@ -42,6 +42,12 @@ type positionBody struct {
 	// price, and no price source has run (K18, L9).
 	Fees []feeBody `json:"fees"`
 
+	// MarketValue and UnrealizedPnL are empty rather than "0" when the run could not price
+	// this position's assets. A price we do not have and a price of zero are different
+	// claims, and collapsing them is how an unpriceable holding becomes a confident nothing.
+	MarketValue   string `json:"market_value"   doc:"signed, in the run's numeraire; empty when unpriced"`
+	UnrealizedPnL string `json:"unrealized_pnl" doc:"market value less cost, both at this run; empty when unpriced"`
+
 	Flat          bool      `json:"flat"            doc:"quantity is zero; kept for its realized PnL and fees"`
 	LastEventTime time.Time `json:"last_event_time" doc:"the event time of the last fill folded into this row"`
 }
@@ -59,6 +65,9 @@ type balanceBody struct {
 	// warned.
 	Negative      bool      `json:"negative"`
 	LastEventTime time.Time `json:"last_event_time"`
+
+	PriceUSD string `json:"price_usd" doc:"this asset's price in the run; empty when unpriced"`
+	ValueUSD string `json:"value_usd" doc:"quantity times price; empty when unpriced"`
 }
 
 type quoteTotalBody struct {
@@ -67,12 +76,38 @@ type quoteTotalBody struct {
 	RealizedPnL string `json:"realized_pnl"`
 }
 
-// portfolioBody has no total, and will not until a valuation run backs one (K11, L10).
-// Realized PnL on BTC-USDT is denominated in USDT and on ETH-BTC in BTC; a field adding
-// them would hold a number with no unit. The subtotals say what can honestly be said, and
-// freshness carries valuation_unavailable to say why there is nothing more.
+// valuationBody is the one run this response was priced from (K11, L10). It is served, not
+// merely used, because "what is my portfolio worth" is only answerable together with "priced
+// how, and how old" -- and a client that can see the run can tell a moving market from a
+// moving price source.
+type valuationBody struct {
+	RunID            int64      `json:"run_id"`
+	AsOf             time.Time  `json:"as_of"`
+	Numeraire        string     `json:"numeraire"`
+	Source           string     `json:"price_source"`
+	AssumedPeg       bool       `json:"assumed_peg" doc:"a leg of this run assumed a peg rather than a traded price"`
+	OldestObservedAt *time.Time `json:"oldest_observed_at" doc:"the age of the run's worst leg"`
+}
+
+// portfolioBody carries a total only when a run backs one, and says what the total leaves
+// out when it does. The subtotals per quote asset stay: they are exact, they need no price,
+// and a reader reconciling against an exchange screen denominated in USDT wants them.
+//
+// The total is the sum of the valued balances and never of the positions. A position and the
+// balance its fills moved are two views of one trade, and adding them counts the money twice.
 type portfolioBody struct {
 	freshness.Envelope
+
+	// TotalValueUSD is empty when no run has completed, and freshness says valuation_unavailable
+	// -- an empty field rather than a zero, because an account nobody could price is not an
+	// account worth nothing (L11).
+	TotalValueUSD string         `json:"total_value_usd"`
+	Valuation     *valuationBody `json:"valuation" doc:"the run every number here was priced from; null when there is none"`
+
+	// UnpricedAssets is what the total excludes. "Worth X" and "worth X, minus the part we
+	// could not price" are different sentences, and only one of them is true.
+	UnpricedAssets []string `json:"unpriced_assets"`
+
 	Positions []positionBody   `json:"positions"`
 	Balances  []balanceBody    `json:"balances"`
 	Subtotals []quoteTotalBody `json:"subtotals_by_quote_asset"`
@@ -115,6 +150,8 @@ func renderPosition(h portfolio.Holding) positionBody {
 		CostBasis:     h.CostBasis.String(),
 		RealizedPnL:   h.RealizedPnL.String(),
 		Fees:          renderFees(h.Fees),
+		MarketValue:   nullText(h.MarketValue),
+		UnrealizedPnL: nullText(h.UnrealizedPnL),
 		Flat:          h.Flat,
 		LastEventTime: h.LastEventTime,
 	}
@@ -137,7 +174,27 @@ func renderBalances(bs []portfolio.Balance) []balanceBody {
 			Quantity:      b.Quantity.String(),
 			Negative:      b.Negative,
 			LastEventTime: b.LastEventTime,
+			PriceUSD:      nullText(b.PriceUSD),
+			ValueUSD:      nullText(b.ValueUSD),
 		})
+	}
+	return out
+}
+
+// renderValuation is nil when no run backs the response, which is the shape that makes the
+// absence unmissable: a client reading total_value_usd without checking this gets an empty
+// string, not a zero it could mistake for an answer.
+func renderValuation(r *portfolio.PriceRun) *valuationBody {
+	if r == nil {
+		return nil
+	}
+	out := &valuationBody{
+		RunID: r.RunID, AsOf: r.AsOf, Numeraire: r.Numeraire,
+		Source: r.Source, AssumedPeg: r.AssumedPeg,
+	}
+	if !r.OldestObservedAt.IsZero() {
+		observed := r.OldestObservedAt
+		out.OldestObservedAt = &observed
 	}
 	return out
 }
@@ -154,7 +211,7 @@ func (d Deps) load(ctx context.Context) (portfolio.Portfolio, error) {
 	if !ok {
 		return portfolio.Portfolio{}, huma.Error401Unauthorized("unauthorized")
 	}
-	return portfolio.Load(ctx, d.DB, accountID, d.Now(), d.LeaseTTL)
+	return portfolio.Load(ctx, d.DB, accountID, d.Now(), d.LeaseTTL, d.PriceTTL)
 }
 
 type positionInput struct {
@@ -184,11 +241,14 @@ func (d Deps) registerPortfolio(api huma.API) {
 			})
 		}
 		return &struct{ Body portfolioBody }{Body: portfolioBody{
-			Envelope:  envelopeOf(p),
-			Positions: renderPositions(p.Holdings),
-			Balances:  renderBalances(p.Balances),
-			Subtotals: subtotals,
-			Fees:      renderFees(p.Fees),
+			Envelope:       envelopeOf(p),
+			TotalValueUSD:  nullText(p.TotalValueUSD),
+			Valuation:      renderValuation(p.Prices),
+			UnpricedAssets: p.Unpriced,
+			Positions:      renderPositions(p.Holdings),
+			Balances:       renderBalances(p.Balances),
+			Subtotals:      subtotals,
+			Fees:           renderFees(p.Fees),
 		}}, nil
 	})
 
