@@ -141,21 +141,21 @@ and the last price in that minute wins. A tick table that grew per push would be
 different product's problem within a week.
 
 **Steps:**
-- [ ] **Step 1: Failing test — a minute holds one row, and it is the last price in it.**
-- [ ] **Step 2: Failing test — the recorder truncates to the minute in UTC**, so two
+- [x] **Step 1: Failing test — a minute holds one row, and it is the last price in it.**
+- [x] **Step 2: Failing test — the recorder truncates to the minute in UTC**, so two
   processes in different zones write the same key rather than two.
-- [ ] **Step 3: Migration + queries + `go tool sqlc generate`.**
-- [ ] **Step 4: The public client and stream**, built on the verified facts from Task 1.
+- [x] **Step 3: Migration + queries + `go tool sqlc generate`.**
+- [x] **Step 4: The public client and stream**, built on the verified facts from Task 1.
   It reuses `internal/exchange/binance`'s dialling and backoff rather than growing a
   second WebSocket implementation — but it carries **no credential and no signer**, which
   is the property that keeps it out of the account path entirely.
-- [ ] **Step 5: A snapshot on start**, so the first valuation run does not have to wait for
+- [x] **Step 5: A snapshot on start**, so the first valuation run does not have to wait for
   a stream push, and a gap-fill on reconnect for the same reason a user-data gap is
   replayed: nothing in the protocol says what happened while the connection was down.
-- [ ] **Step 6: Wire into `cmd/worker`** as one feed per process, not one per integration.
+- [x] **Step 6: Wire into `cmd/worker`** as one feed per process, not one per integration.
   Prices are not per account, and a feed per account would multiply an IP-wide budget by
   the number of users (K24).
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ---
 
