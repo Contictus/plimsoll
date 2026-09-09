@@ -176,6 +176,14 @@ type PositionStrategy struct {
 	AssignedAt    time.Time
 }
 
+type PriceTick struct {
+	InstrumentID int64
+	Ts           time.Time
+	Price        decimal.Decimal
+	Source       string
+	ObservedAt   time.Time
+}
+
 type ProjectionCursor struct {
 	AccountID         uuid.UUID
 	IntegrationID     uuid.UUID

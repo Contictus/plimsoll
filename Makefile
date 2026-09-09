@@ -49,8 +49,13 @@ lint: ## golangci-lint
 docs-check: ## CLAUDE.md must be byte-identical to AGENTS.md
 	@diff -u CLAUDE.md AGENTS.md && echo "docs-check: OK"
 
-up: ## start the stack and wait for health
-	$(COMPOSE) up -d --wait
+up: ## build, migrate and start the stack, waiting for health
+	# --build is not an optimisation to drop. plimsollctl carries the migrations
+	# embedded in its binary (K46), so an image built before the newest migration
+	# would start the stack against a schema older than the code -- which is the exact
+	# mismatch embedding them was chosen to make impossible. The build cache makes a
+	# no-change rebuild cheap; a stale schema is not cheap at all.
+	$(COMPOSE) up -d --build --wait
 
 down: ## stop the stack and drop volumes
 	$(COMPOSE) down -v

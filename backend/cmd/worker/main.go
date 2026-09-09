@@ -112,6 +112,21 @@ func run(log *slog.Logger) error {
 		"symbols", len(d.symbols))
 
 	var wg sync.WaitGroup
+
+	// The price feed runs beside the supervisors, once for the process rather than once per
+	// integration: prices are the same for every account, and a feed per account would
+	// multiply an IP-wide budget by the number of users (K24).
+	//
+	// It starts here, after connect, rather than before the assignments check -- for the
+	// same reason that check exists. The limiter's ceiling comes from exchangeInfo, and a
+	// process with nothing to run has no business calling a venue. Nothing is lost by
+	// waiting: klines can backfill a window that was never streamed (F9).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runPrices(ctx, pool, d.limiter, log)
+	}()
+
 	for _, assignment := range assignments {
 		wg.Add(1)
 		go func() {
