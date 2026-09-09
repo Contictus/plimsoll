@@ -272,14 +272,14 @@ Replaces the boolean `stale` (K23, L11). It is API surface, not diagnostics:
 | code | raised by |
 |---|---|
 | `ws_gap` | missed keepalive, disconnect, sequence hole |
-| `price_stale` | mark price older than tolerance |
+| `price_stale` | the oldest leg of the response's valuation run is older than tolerance, measured from the read time (K47) |
 | `backfill_incomplete` | staged backfill still running (K26) |
 | `history_truncated` | the venue will not return data before a cutoff -- permanent, unlike `backfill_incomplete` |
 | `assumed_peg` | a price path fell back to 1.00 (K17) |
 | `unknown_symbol` | alias resolution failed (K22) |
 | `reconciliation_mismatch` | an open finding above tolerance |
 | `fee_price_missing` | no price for a fee asset at `event_time` (K18) |
-| `valuation_unavailable` | no price source has run, so the response carries subtotals per quote asset and no total (M3; M4 removes it) |
+| `valuation_unavailable` | no valuation run has completed, so the response carries subtotals per quote asset and no total. **Narrowed in M4, not retired** (K47): a fresh install whose feed has never connected must not report a confident zero |
 | `ingest_stalled` | no worker is reading an integration, or the one that was has stopped reporting (K39) |
 | `projection_lagging` | events are in the ledger that the fold has not reached (K38) |
 | `lineage_mismatch` | replaying a position's events did not reproduce the stored projection (K43) |

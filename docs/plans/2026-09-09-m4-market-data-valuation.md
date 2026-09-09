@@ -285,16 +285,16 @@ a confident zero — which is the failure the reason was written to prevent, arr
 the door marked "cleanup". `ARCHITECTURE.md` §5's table is corrected as part of this task.
 
 **Steps:**
-- [ ] **Step 1: Failing test — the total is the sum of the valued holdings**, and every
+- [x] **Step 1: Failing test — the total is the sum of the valued holdings**, and every
   number in the response is a JSON string (the `requireMoneyIsString` walker already in
   `httpapi` covers new fields for free).
-- [ ] **Step 2: Failing test — an assumed peg reaches the response** as `assumed_peg`,
+- [x] **Step 2: Failing test — an assumed peg reaches the response** as `assumed_peg`,
   info, and does not degrade an otherwise exact total below `degraded`.
-- [ ] **Step 3: Failing test — a stale run is reported, not hidden.**
-- [ ] **Step 4: Failing test — an unpriceable holding does not silently drop out of the
+- [x] **Step 3: Failing test — a stale run is reported, not hidden.**
+- [x] **Step 4: Failing test — an unpriceable holding does not silently drop out of the
   total.** It is the difference between "your portfolio is worth X" and "your portfolio is
   worth X, minus the part we could not price", and only one of those is true.
-- [ ] **Step 5: Implement, then commit.**
+- [x] **Step 5: Implement, then commit.**
 
 ---
 

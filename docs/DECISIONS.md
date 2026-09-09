@@ -690,6 +690,51 @@ The embed is guarded by a test that compares the embedded set against the direct
 name **and by contents** — two files can share a name and differ in every byte, which is
 exactly what a stale embed is.
 
+### K47 - The total is the sum of the balances, and it names what it leaves out · `extends K11`
+
+M4 gave the portfolio a total, and the question that took the longest to answer was not how
+to compute it but *what to add up*. Two candidates were on the table and only one of them is
+a portfolio.
+
+**The total is the valued balances, never the positions' market values.** A position and the
+balance its fills moved are two views of one trade: buying 0.5 BTC creates a BTC position
+and a BTC balance out of the same event. Summing both counts the account's money twice, and
+the resulting number is wrong in a way that looks plausible on a screen -- roughly double,
+which reads as "leverage" to anyone who does not already know the bug. Positions still get
+`market_value` and `unrealized_pnl` individually, because "what is this exposure worth" is a
+real question; they are just not what the account is worth.
+
+**A total that excluded something says so.** An asset with no route to USD is named in
+`unpriced_assets` and raised as `unknown_symbol` at error severity. "Your portfolio is worth
+X" and "worth X, minus the part we could not price" are different sentences and only one of
+them is true.
+
+**A run that priced *nothing* the account holds produces no total at all.** The empty sum is
+arithmetically defensible and reads on screen as an empty account. That is the same failure
+`valuation_unavailable` was written to prevent, arriving by a different route, so the field
+is absent rather than zero -- and absent is an empty string, never `0`, for the reason L1's
+`nullText` exists.
+
+**`valuation_unavailable` was narrowed rather than retired.** `ARCHITECTURE.md` said "M3; M4
+removes it", and that was half right. The reason keeps exactly one job: no run has completed.
+On a fresh install whose feed has never connected there genuinely is no valuation, and a
+release that deleted the code path in the name of cleanup would have shipped a confident zero
+to the one user least able to tell it was wrong.
+
+**Price staleness is measured against the read time, from the run's worst leg.** The worst
+and not the average, because a total is only as current as the oldest price inside it and an
+average hides one forgotten instrument behind a hundred fresh ones. Against the read time and
+not the run's own `as_of`, because a run produced an hour ago from prices that were fresh
+when it ran is stale *now*, and now is when the reader is asking.
+
+The tolerance is sized by how prices are produced rather than by how fast a market moves: the
+stream reports only tickers that changed (F7), so a quiet instrument's age is bounded by the
+worker's REST re-snapshot. Twenty minutes therefore means "the snapshot loop has stopped",
+which is worth a warning; a tighter value would only report that some listed pair is quiet,
+which is not news, and a warning a reader learns to ignore is worse than no warning at all.
+
+---
+
 ---
 
 ---
