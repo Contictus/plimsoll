@@ -350,7 +350,7 @@ Directories are created when the module is written, not in advance.
 | **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
 | **M3.5** ✅ | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
 | **M4** ✅ | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working. `GET /pnl` and the lineage price paths shipped with it; `GET /portfolio/history` deliberately deferred (K48) |
-| **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
+| **M5** 🔨 | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode — planned, venue verified (F14–F18): `docs/plans/2026-09-10-m5-perpetuals-collateral.md` |
 | **M6** | Strategy + risk + alerting | Strategy-level net delta; thresholds with hysteresis and cooldown; Telegram/webhook; SSE; dashboard v1 |
 | **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
 | **M7.5** | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock |
