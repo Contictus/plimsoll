@@ -27,6 +27,12 @@ const maxResyncWindow = 24 * time.Hour
 // silently lag a fill before the lag is worth more than the transactions saved.
 const defaultProjectEvery = 2 * time.Second
 
+// defaultCaptureEvery is how often the margin picture is refreshed when nothing says
+// otherwise. Chosen against the API's collateral TTL rather than against the market: several
+// captures may be missed before a reader is warned, so this is the interval at which "the
+// loop is alive" stays true, not an attempt to track every tick of the mark.
+const defaultCaptureEvery = 30 * time.Second
+
 // ErrNotLeader means another worker holds the lease for this integration. It is a normal
 // outcome on a fleet, not a failure: most workers lose most claims.
 var ErrNotLeader = errors.New("worker: another worker holds this integration")
@@ -68,6 +74,13 @@ type Projector interface {
 	Project(ctx context.Context) error
 }
 
+// Capturer takes one picture of what the venue's margin engine currently believes. Separate
+// from Stepper because it is not history being walked towards an end: it is a snapshot that
+// is asked for again and again, and the previous answer is not built on.
+type Capturer interface {
+	Capture(ctx context.Context) error
+}
+
 // SupervisorConfig is one integration's ingestion, assembled. Everything that touches time,
 // the network or the database is injected, so the supervisor's own logic is what the tests
 // exercise.
@@ -103,6 +116,23 @@ type SupervisorConfig struct {
 	// is how an operator hears about it: this package holds no logger, and the alternative
 	// to a callback is a failure nobody outside the process ever sees (L11).
 	OnProjectError func(error)
+
+	// Capture takes the margin picture on a ticker of its own. Optional and nil by default:
+	// an integration with no futures wallet has nothing to capture, and a supervisor that
+	// demanded one could not run a spot-only account at all.
+	Capture Capturer
+
+	// CaptureEvery is how often the margin picture is refreshed. Its cost is the reason it
+	// is a ticker and not a per-event call: one capture is three signed requests, and the
+	// buffer only changes when the mark does -- which is continuously, so there is no event
+	// to hang it on.
+	CaptureEvery time.Duration
+
+	// OnCaptureError is called when a capture fails and the supervisor carries on anyway,
+	// for the same reason OnProjectError exists: this package holds no logger, and the
+	// alternative is a failure nobody outside the process ever sees (L11). The reader is
+	// told independently, by /risk ageing into collateral_stale.
+	OnCaptureError func(error)
 
 	Now func() time.Time
 }
@@ -150,6 +180,9 @@ func NewSupervisor(cfg SupervisorConfig) (*Supervisor, error) {
 		// A third of the TTL: two heartbeats may be lost before the lease lapses, so a
 		// single slow transaction does not hand the integration to another worker.
 		cfg.HeartbeatEvery = cfg.LeaseTTL / 3
+	}
+	if cfg.CaptureEvery <= 0 {
+		cfg.CaptureEvery = defaultCaptureEvery
 	}
 	if cfg.ProjectEvery <= 0 {
 		cfg.ProjectEvery = defaultProjectEvery
@@ -226,7 +259,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	// looking calm (K24). The watchdog is separate again so that a lease lost while both
 	// are busy still stops them.
 	var wg sync.WaitGroup
-	failure := make(chan error, 4)
+	failure := make(chan error, 5)
 
 	wg.Add(1)
 	go func() {
@@ -241,6 +274,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		if err := s.runProjector(runCtx); err != nil {
+			failure <- err
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.runCapture(runCtx); err != nil {
 			failure <- err
 			cancel()
 		}
@@ -474,6 +516,42 @@ func (s *Supervisor) runProjector(ctx context.Context) error {
 				}
 				if s.cfg.OnProjectError != nil {
 					s.cfg.OnProjectError(err)
+				}
+			}
+		}
+	}
+}
+
+// runCapture refreshes the margin picture on a ticker, beside the ingestion.
+//
+// A failed capture does not stop the supervisor, for the same reason a failed fold does not:
+// live events are the one thing that cannot be recovered, and a margin picture is asked for
+// again in one interval. The reader is told anyway -- /risk ages the stored snapshot into
+// collateral_stale on its own, so a capture loop that has quietly died is visible to the
+// person looking at the number whether or not this process is alive to say so (L11).
+func (s *Supervisor) runCapture(ctx context.Context) error {
+	if s.cfg.Capture == nil {
+		return nil
+	}
+	ticker := time.NewTicker(s.cfg.CaptureEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := s.cfg.Capture.Capture(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				// A lost lease is the exception, as everywhere else: it does not mean the
+				// venue failed, it means this worker is no longer entitled to write.
+				if errors.Is(err, ErrLeaseLost) {
+					return err
+				}
+				if s.cfg.OnCaptureError != nil {
+					s.cfg.OnCaptureError(err)
 				}
 			}
 		}

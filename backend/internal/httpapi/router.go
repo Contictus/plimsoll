@@ -50,6 +50,13 @@ type Deps struct {
 	// value would only report that some listed pair is quiet, which is not news.
 	PriceTTL time.Duration
 
+	// CollateralTTL is how old a captured margin picture may be before the response says
+	// so. Sized by the worker's capture interval rather than by how fast a market moves: a
+	// snapshot older than several captures means the capture loop has stopped, and that --
+	// not volatility -- is what a reader needs to be told, because the number on the screen
+	// then describes an account that has since moved.
+	CollateralTTL time.Duration
+
 	// PegAssets is the comma-separated peg configuration a rebuilt run terminates its price
 	// paths with (K17). The API needs it because `?at=` rebuilds a run rather than reading
 	// one; it is the same setting the worker produces runs with, and the resolution is
@@ -61,6 +68,10 @@ type Deps struct {
 // processes are deployed separately and may briefly disagree; the consequence of a stale
 // value here is a status believed a little too long or too briefly, never a wrong number.
 const defaultLeaseTTL = 2 * time.Minute
+
+// defaultCollateralTTL allows four of cmd/worker's captures to be missed before a reader is
+// warned, so one slow response does not flag an account that is being watched perfectly well.
+const defaultCollateralTTL = 2 * time.Minute
 
 // defaultPriceTTL allows one re-snapshot interval (15 minutes, cmd/worker) plus the slack
 // for a run to be produced and read.
@@ -79,6 +90,9 @@ func NewRouter(d Deps) http.Handler {
 	if d.PriceTTL <= 0 {
 		d.PriceTTL = defaultPriceTTL
 	}
+	if d.CollateralTTL <= 0 {
+		d.CollateralTTL = defaultCollateralTTL
+	}
 	if d.PegAssets == "" {
 		d.PegAssets = valuation.DefaultPegAssets
 	}
@@ -91,6 +105,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerPortfolio(api)
 	d.registerLineage(api)
 	d.registerPnL(api)
+	d.registerRisk(api)
 
 	return router
 }

@@ -129,3 +129,19 @@ const ReasonLineageMismatch = "lineage_mismatch"
 // missing event without knowing what the missing event was, and it is an error: a balance
 // that cannot exist means the numbers built on it are wrong, not merely late.
 const ReasonNegativeBalance = "negative_balance"
+
+// ReasonCollateralStale means the account's margin picture is older than a capture interval:
+// the buffer and the liquidation distances below it describe the exchange as it was, not as
+// it is. It is served rather than withheld -- an hour-old distance is still the best answer
+// anyone has -- and it is a warning, because the numbers are exact about a moment that has
+// passed rather than wrong about this one.
+const ReasonCollateralStale = "collateral_stale"
+
+// ReasonCollateralUnavailable means no capture exists for an integration that should have
+// one, so how close it is to liquidation is unknown.
+//
+// An error, and the response omits the integration entirely rather than rendering it with
+// zeroes. A margin buffer of zero and an unknown margin buffer are opposite claims -- one
+// says liquidation is imminent, the other says nothing at all -- and a screen that renders
+// them the same is the confident-and-wrong failure at the one moment it costs most (L11).
+const ReasonCollateralUnavailable = "collateral_unavailable"
