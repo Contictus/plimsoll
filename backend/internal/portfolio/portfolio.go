@@ -54,6 +54,13 @@ type Position struct {
 	// honest answer to "how current is this position", and it is not the same as the
 	// response's AsOf: one is the account's last activity, the other is when we looked.
 	LastEventTime time.Time
+
+	// Strategy is the group the user put this position in, empty when untagged. It is read
+	// alongside the fold rather than stored on it: the tag is user input and `positions` is
+	// dropped and rebuilt (K30). StrategyID is carried too, because a client that wants to
+	// re-tag needs the id and the name is what a human reads.
+	Strategy   string
+	StrategyID uuid.UUID
 }
 
 // Holding is a Position with what Build derived from it.
