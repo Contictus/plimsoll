@@ -554,3 +554,125 @@ number between them (L5).
   if one exists it would arrive in `raw` (L15) and the fold would need L9 applied to it.
 - Whether `tranId` is globally unique across transfer types. Assumed not, which is the safe
   direction: a wider identity cannot merge two transfers, a narrower one can.
+
+---
+
+## 8. USD-M perpetuals and collateral (M5)
+
+Read on **2026-09-10** against `developers.binance.com`. Everything below is quoted from a
+page that was actually opened; where a value could not be read off the page, that is stated
+rather than filled in from a plausible memory.
+
+### F14 — `positionRisk` does not carry maintenance margin, and the account endpoint does
+
+`GET /fapi/v3/positionRisk` — *Position Information V3*, weight **1** (IP). Its fields:
+
+```
+symbol · positionAmt · entryPrice · markPrice · unRealizedProfit · unRealizedProfitRate
+roiRate · leverage · maxNotionalValue · liquidationPrice · marginType · isAutoAddMargin
+positionSide · notional · isolatedCreated · adlQuantile · marginRatio · updateTime
+```
+
+`liquidationPrice` is here, which is what K6 reads rather than computes. **`maintMargin` is
+not.** Maintenance margin lives on `GET /fapi/v3/account` — *Account Information V3*, weight
+**5** — as `totalMaintMargin` for the account and `positions[].maintMargin` per position,
+beside `totalMarginBalance`, `totalWalletBalance`, `totalUnrealizedProfit` and
+`availableBalance`.
+
+So the margin buffer is `totalMarginBalance - totalMaintMargin`, and both halves come from
+one response. The consequence for the design is that **collateral is a snapshot of the
+account endpoint while liquidation price is a snapshot of positionRisk**, and the two must be
+captured as one act at one instant. A buffer from 12:00:00 next to a liquidation price from
+12:00:30 is a screen describing two different accounts — the exact failure L10 exists to
+prevent, arriving through a door L10 did not name because it is not about prices.
+
+### F15 — the MMR table is its own endpoint, and M7.5 does not exist without it
+
+`GET /fapi/v1/leverageBracket` — *Notional and Leverage Brackets*, weight **1**:
+
+```json
+{ "symbol": "...", "notionalCoef": ..., "brackets": [
+  { "bracket": 1, "initialLeverage": 75, "notionalCap": 10000,
+    "notionalFloor": 0, "maintMarginRatio": 0.0065, "cum": 0.0 } ] }
+```
+
+`account.maintMargin` is today's number at today's notional. A price shock changes the
+notional, and a large enough one crosses a bracket into a **higher** `maintMarginRatio` — so
+the scenario shock's whole point, "how far am I from liquidation if BTC drops 20%", cannot be
+answered by scaling the current maintenance margin. It needs the table.
+
+Which is why the brackets are captured in M5 rather than in M7.5: M7.5 is a pure function
+over data (L4), and a pure function cannot go and fetch what it was not given. Recording this
+now is the difference between M7.5 being a week and M7.5 discovering it needs an ingest path.
+
+### F16 — the income enum is not fully published, and paging is by page number
+
+`GET /fapi/v1/income` — weight **30**. Quoted: *"Income history only contains data for the
+last three months."* · *"If `incomeType` is not sent, all kinds of flow will be returned"* ·
+*"If `startTime` and `endTime` are not sent, the recent 7-day data will be returned."*
+
+Parameters are `symbol`, `incomeType`, `startTime`, `endTime`, `page`, `limit` (max 1000,
+default 100). Page-number paging over a moving table again (F10), so the walk is windowed for
+the same reason.
+
+The rendered page lists `TRANSFER`, `WELCOME_BONUS`, `REALIZED_PNL`, `FUNDING_FEE`,
+`COMMISSION`, `INSURANCE_CLEAR`, `REFERRAL_KICKBACK`, `COMMISSION_REBATE` and then **refers
+to fifteen further types it does not display**. So the enum cannot be read off the page in
+full, and the treatment is F11's: map the types V1 folds, and refuse an unrecognized one
+loudly rather than let an unknown cash flow through as zero.
+
+Also quoted, confirming F3 in the venue's own words (typo included): *"`trandId` is unique in
+the same `incomeType` for a user."* The identity is `usdm:income:<incomeType>:<tranId>`, and
+F12 still stands: `TRANSFER` rows here are the wallet endpoint's transfers seen a second time
+and are skipped, or the money moves twice.
+
+### F17 — the futures user stream moved, and the old URL has been dead for five months
+
+Quoted from *Important WebSocket Change Notice*: *"Legacy URLs will remain available until
+**2026-04-23**, after which they will be permanently decommissioned."* · *"After the upgrade,
+any connections not migrated will ONLY be able to receive data from
+`wss://fstream.binance.com/public`."*
+
+| Legacy (dead since 2026-04-23) | Now |
+|---|---|
+| `wss://fstream.binance.com/ws` | `wss://fstream.binance.com/public` — high-frequency data |
+| `wss://fstream.binance.com/stream` | `wss://fstream.binance.com/market` — regular market data |
+| | `wss://fstream.binance.com/private` — **user data** |
+
+The listenKey goes in the query string: `?listenKey=<key>&events=ORDER_TRADE_UPDATE`.
+`POST /fapi/v1/listenKey` mints one (weight 1); *"The stream will close after 60 minutes
+unless a keepalive is sent"*, refreshed with `PUT /fapi/v1/listenKey`.
+
+This is F1 wearing different clothes, and it is the reason that rule exists: a futures stream
+written from memory in 2026 connects to a URL that stopped serving user data in April, and
+the symptom is a worker that connects successfully and never receives an event — which looks
+exactly like an account with no activity.
+
+The existing code is not affected. Spot uses `wss://ws-api.binance.com` (F1) and market data
+uses `wss://data-stream.binance.vision` (F6); neither is `fstream`.
+
+### F18 — futures fills are per symbol, so discovery happens again
+
+`GET /fapi/v1/userTrades` — *Account Trade List*, weight **5**, `symbol` **required**.
+Fields: `buyer, commission, commissionAsset, id, maker, orderId, price, qty, quoteQty,
+baseQty, marginAsset, realizedPnl, side, positionSide, symbol, pair, time`.
+
+F4's problem again: there is no "all my futures trades". The spot discovery sweep (K33) is
+the shape the futures walk needs too, over the futures symbol universe rather than the spot
+one. `positionSide` is `BOTH` in one-way mode, which is V1's only mode.
+
+`realizedPnl` arrives on the fill. The position engine computes realized PnL itself from the
+average-cost fold (K5), so the venue's number is a **reconciliation input, not an ingest
+input** — storing it as truth would create the second source of truth L3 forbids, and folding
+it as well as computing it would double the number.
+
+### Still unverified for M5
+
+- The fifteen `incomeType` values the page refers to but does not render. Whitelisted rather
+  than guessed (F16).
+- Whether `/fapi/v3/positionRisk` returns every symbol or only symbols with an open position.
+  The catalog page says "all symbols"; the endpoint page did not render far enough to confirm.
+  The safe reading is "all", so a zero `positionAmt` row must be treated as *no position*
+  rather than as a position of zero.
+- The `ACCOUNT_UPDATE` payload's field names and its event-reason field. The stream is M5's
+  live half; the REST snapshot above is enough to build and test the fold without it.
