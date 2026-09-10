@@ -594,3 +594,135 @@ func legsOf(t *testing.T, instrumentID int64) (base, quote int64) {
 		instrumentID).Scan(&base, &quote))
 	return base, quote
 }
+
+// transferEvent is one asset moving between two wallets of one integration. It names no
+// instrument, because a transfer is not a trade -- which is exactly why it must not touch a
+// position.
+func transferEvent(accountID, integrationID uuid.UUID, assetID int64, from, to, quantity string, seq int64) ledger.Event {
+	return ledger.Event{
+		AccountID:     accountID,
+		IntegrationID: integrationID,
+		VenueEventID:  fmt.Sprintf("transfer:MAIN_UMFUTURE:%d", seq),
+		VenueSequence: seq,
+		Source:        "rest",
+		EventType:     ledger.TypeTransfer,
+		AssetID:       &assetID,
+		TransferFrom:  from,
+		TransferTo:    to,
+		Quantity:      amount(quantity),
+		EventTime:     epoch.Add(time.Duration(seq) * time.Second),
+		Raw:           json.RawMessage(`{"probe":"transfer"}`),
+	}
+}
+
+// M3.5'S EXIT CRITERION, end to end: a spot to futures transfer is not counted as a sale.
+//
+// Four things must be true of it at once, and three of them are things that must NOT change.
+// The transfer moves 500 of the quote asset between two wallets of one integration, and
+// afterwards the balance is what it was, the position quantity is what it was, and the
+// realized PnL is what it was. The fourth is that the event is nonetheless there, in the
+// ledger, having advanced the cursor -- history, not arithmetic.
+func TestATransferBetweenWalletsIsNotCountedAsASale(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+	_, quote := legsOf(t, instrumentID)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "2", "100", 1), accountID, integrationID, instrumentID),
+		storable(trade(ledger.SideSell, "1", "120", 2), accountID, integrationID, instrumentID),
+	)
+	project(t, accountID, integrationID)
+
+	beforeBalances := balanceSnapshot(t, accountID, integrationID)
+	beforePositions := snapshot(t, accountID, integrationID)
+	require.NotEmpty(t, beforePositions)
+	require.NotEqual(t, "0", beforePositions[0].RealizedPnL.String(),
+		"the fixture must have a realized PnL for the transfer to be able to disturb")
+
+	appendEvents(t, accountID,
+		transferEvent(accountID, integrationID, quote, "spot", "usdm", "500", 3))
+	project(t, accountID, integrationID)
+
+	afterBalances := balanceSnapshot(t, accountID, integrationID)
+	afterPositions := snapshot(t, accountID, integrationID)
+
+	require.Empty(t, cmp.Diff(beforeBalances, afterBalances, compareExactly),
+		"the transfer moved the balance; money that stayed inside the account was spent")
+	require.Empty(t, cmp.Diff(beforePositions, afterPositions, compareExactly),
+		"the transfer disturbed a position it never named")
+
+	// And yet it is not skipped: the cursor advanced past it, which is what stops the
+	// projector rereading it on every pass forever.
+	var cursor string
+	require.NoError(t, tenancy.InTxRaw(context.Background(), appPool(t), accountID,
+		func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(),
+				`SELECT last_venue_event_id FROM projection_cursors WHERE integration_id = $1`,
+				integrationID).Scan(&cursor)
+		}))
+	require.Equal(t, "transfer:MAIN_UMFUTURE:3", cursor,
+		"the cursor did not advance past the transfer, so the projector will reread it forever")
+}
+
+// L3, with a transfer in the stream. A fold rule whose answer is "nothing" still has to
+// produce that nothing identically on the second pass -- and the cursor columns are where a
+// rule that quietly skipped the event instead of folding it would show up.
+func TestRebuildingReproducesAProjectionWithATransferInIt(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+	_, quote := legsOf(t, instrumentID)
+
+	appendEvents(t, accountID,
+		storable(trade(ledger.SideBuy, "2", "100", 1), accountID, integrationID, instrumentID),
+		transferEvent(accountID, integrationID, quote, "spot", "usdm", "500", 2),
+	)
+	project(t, accountID, integrationID)
+
+	appendEvents(t, accountID,
+		transferEvent(accountID, integrationID, quote, "usdm", "spot", "500", 3),
+		storable(trade(ledger.SideSell, "1", "120", 4), accountID, integrationID, instrumentID),
+	)
+	project(t, accountID, integrationID)
+
+	incrementalBalances := balanceSnapshot(t, accountID, integrationID)
+	incrementalPositions := snapshot(t, accountID, integrationID)
+	require.NotEmpty(t, incrementalBalances)
+
+	require.NoError(t,
+		projection.Rebuild(context.Background(), appPool(t), accountID, integrationID))
+
+	require.Empty(t, cmp.Diff(incrementalBalances,
+		balanceSnapshot(t, accountID, integrationID), compareExactly),
+		"the balances cannot be rebuilt from a ledger containing a transfer")
+	require.Empty(t, cmp.Diff(incrementalPositions,
+		snapshot(t, accountID, integrationID), compareExactly),
+		"the positions cannot be rebuilt from a ledger containing a transfer")
+}
+
+// The external branch, through the database rather than only through the engine. Nothing
+// writes an `external` endpoint yet -- M8's cross-venue transfers do -- so this is the only
+// thing standing between that branch and a rule that had quietly become "a transfer moves
+// nothing" by the time anyone needed it.
+//
+// It is also what makes the internal case falsifiable. Without it, a projector that skipped
+// TRANSFER events outright would produce identical numbers to one that folds them correctly,
+// and no test could tell the two apart.
+func TestATransferToTheOutsideMovesTheBalanceThroughTheProjection(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+	_, quote := legsOf(t, instrumentID)
+
+	appendEvents(t, accountID,
+		transferEvent(accountID, integrationID, quote, "external", "spot", "1000", 1),
+		transferEvent(accountID, integrationID, quote, "spot", "external", "250", 2),
+	)
+	project(t, accountID, integrationID)
+
+	held := map[int64]string{}
+	for _, b := range balanceSnapshot(t, accountID, integrationID) {
+		held[b.AssetID] = b.Quantity.String()
+	}
+	require.Equal(t, "750", held[quote],
+		"money crossing the account boundary must move the balance; the direction comes "+
+			"from which endpoint is external, never from the sign of the quantity")
+}

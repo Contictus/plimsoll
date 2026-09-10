@@ -105,14 +105,7 @@ func byType(e ledger.Event, r Resolved) ([]Delta, error) {
 		return single(e, e.Quantity, true)
 
 	case ledger.TypeTransfer:
-		// A transfer's quantity is SIGNED: positive into this integration, negative out of
-		// it. Unlike a deposit, one transfer is one movement seen from two sides, and a
-		// type that could not tell them apart would need two types for one fact.
-		//
-		// Nothing produces these yet -- the transfer normalizer arrives with K12 -- so this
-		// is the convention that normalizer must honour, written where the fold can enforce
-		// it rather than left to be rediscovered.
-		return single(e, e.Quantity, false)
+		return transfer(e)
 
 	case ledger.TypeFundingPayment:
 		// A cash flow in the settle asset. V1 is USD-M only (PROJECT.md section 1), so the
@@ -137,6 +130,60 @@ func byType(e ledger.Event, r Resolved) ([]Delta, error) {
 
 	default:
 		return nil, fmt.Errorf("%w: %s (%s)", ErrUnsupportedEventType, e.EventType, e.VenueEventID)
+	}
+}
+
+// Wallet is one endpoint of a transfer. The vocabulary is closed and matches the schema's
+// (00020); external is the only one that is not a wallet of this integration, and it is
+// therefore the only one that makes a transfer move anything.
+const (
+	WalletExternal = "external"
+)
+
+// transfer folds a movement between two named wallets.
+//
+// The answer for the common case is nothing. asset_balances is keyed per integration, not
+// per wallet, so moving USDT from spot to futures leaves the account holding exactly what it
+// held. The event is history and lineage; it is not arithmetic. Reading it as a disposal is
+// the error this milestone is named after -- it invents a realized loss, and then a phantom
+// re-purchase when the money comes back.
+//
+// One side external is a real movement, and which side supplies the direction. Nothing
+// writes that today; M8's cross-venue transfers do. The branch is here now because a rule
+// that only ever ran on the internal case would have silently become "a transfer moves
+// nothing", and the first withdrawal would have vanished.
+func transfer(e ledger.Event) ([]Delta, error) {
+	if e.TransferFrom == "" || e.TransferTo == "" {
+		return nil, fmt.Errorf("%w: %s is a transfer that names %q -> %q",
+			ErrMalformedEvent, e.VenueEventID, e.TransferFrom, e.TransferTo)
+	}
+	if e.TransferFrom == WalletExternal && e.TransferTo == WalletExternal {
+		// Not this account's money moving, and not an internal transfer either: a
+		// normalizer that lost track of which side of the wire it was on. Folding it to
+		// nothing would hide that.
+		return nil, fmt.Errorf("%w: %s transfers from outside to outside",
+			ErrMalformedEvent, e.VenueEventID)
+	}
+	if !e.Quantity.Valid {
+		return nil, fmt.Errorf("%w: %s transfers no amount",
+			ErrMalformedEvent, e.VenueEventID)
+	}
+	if e.Quantity.Decimal.IsNegative() {
+		// The retired convention showing up again. With the direction on the endpoints a
+		// sign can only disagree with them, and the disagreement would be silent: a
+		// withdrawal of -500 would read as money arriving.
+		return nil, fmt.Errorf("%w: %s transfers a negative quantity; the endpoints carry the direction",
+			ErrMalformedEvent, e.VenueEventID)
+	}
+
+	switch {
+	case e.TransferTo == WalletExternal:
+		return single(e, e.Quantity, true)
+	case e.TransferFrom == WalletExternal:
+		return single(e, e.Quantity, false)
+	default:
+		// Both wallets belong to this integration. The account holds what it held.
+		return nil, nil
 	}
 }
 

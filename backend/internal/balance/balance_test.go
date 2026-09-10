@@ -41,6 +41,39 @@ func moved(t *testing.T, deltas []balance.Delta) [][2]string {
 	return out
 }
 
+// transfer is one asset moving between two named wallets. Quantity is unsigned: the two
+// endpoints carry the direction (F10).
+func transfer(from, to, quantity string) ledger.Event {
+	asset := usdt
+	return ledger.Event{
+		VenueEventID: "transfer:MAIN_UMFUTURE:1",
+		EventType:    ledger.TypeTransfer,
+		AssetID:      &asset,
+		TransferFrom: from,
+		TransferTo:   to,
+		Quantity:     dec(quantity),
+	}
+}
+
+// fold accumulates the deltas of several events the way the projector does, so a test can
+// state what an account holds after a sequence rather than after one event.
+func fold(t *testing.T, events []ledger.Event, resolved []balance.Resolved) map[int64]string {
+	t.Helper()
+	held := map[int64]decimal.Decimal{}
+	for i, e := range events {
+		deltas, err := balance.Deltas(e, resolved[i])
+		require.NoError(t, err)
+		for _, d := range deltas {
+			held[d.AssetID] = held[d.AssetID].Add(d.Amount)
+		}
+	}
+	out := map[int64]string{}
+	for id, amount := range held {
+		out[id] = amount.String()
+	}
+	return out
+}
+
 func fill(side ledger.Side, quantity, price string) ledger.Event {
 	return ledger.Event{
 		VenueEventID: "spot:trade:BTCUSDT:1",
@@ -133,18 +166,91 @@ func TestADepositAddsAndAWithdrawalSubtractsTheSameNumber(t *testing.T) {
 	}
 }
 
-// A transfer's quantity is signed, because one transfer is one movement seen from two
-// sides. Nothing produces these yet; this is the convention the K12 normalizer must honour,
-// written where the fold can enforce it rather than left to be rediscovered.
-func TestATransferReadsItsDirectionFromTheSign(t *testing.T) {
-	asset := usdt
-	out := ledger.Event{
-		VenueEventID: "spot:transfer:1", EventType: ledger.TypeTransfer,
-		AssetID: &asset, Quantity: dec("-500"),
+// THE TEST THIS MILESTONE EXISTS FOR.
+//
+// asset_balances is keyed per integration, not per wallet. Moving USDT from the spot wallet
+// to the futures wallet of one account does not change what that account holds, so the fold
+// produces nothing at all. The event stays in the ledger because it is history and lineage
+// -- it is simply not arithmetic.
+//
+// The failure this prevents is the one the milestone is named after: a transfer out read as
+// a disposal, which invents a realized loss and then a phantom re-purchase when the money
+// comes back.
+func TestATransferBetweenTwoWalletsOfOneIntegrationMovesNothing(t *testing.T) {
+	for _, tc := range [][2]string{
+		{"spot", "usdm"},
+		{"usdm", "spot"},
+		{"spot", "funding"},
+		{"margin", "coinm"},
+	} {
+		got, err := balance.Deltas(transfer(tc[0], tc[1], "500"), balance.Resolved{})
+		require.NoError(t, err)
+		require.Empty(t, moved(t, got), "%s -> %s moved something", tc[0], tc[1])
 	}
-	got, err := balance.Deltas(out, balance.Resolved{})
+}
+
+// The branch M8 turns on. One side outside this integration is a real movement, and which
+// side it is supplies the direction -- the quantity itself is unsigned, because with both
+// endpoints named a sign would be a second statement of the same fact.
+//
+// Written now rather than with M8, because a rule that only ever ran on the internal case
+// would have quietly become "a transfer moves nothing", and the first cross-venue withdrawal
+// would have vanished.
+func TestATransferWithAnExternalSideMovesTheBalance(t *testing.T) {
+	out, err := balance.Deltas(transfer("spot", "external", "500"), balance.Resolved{})
 	require.NoError(t, err)
-	require.Equal(t, "-500", got[0].Amount.String())
+	require.Equal(t, [][2]string{{"2", "-500"}}, moved(t, out), "money that left is still held")
+
+	in, err := balance.Deltas(transfer("external", "spot", "500"), balance.Resolved{})
+	require.NoError(t, err)
+	require.Equal(t, [][2]string{{"2", "500"}}, moved(t, in), "money that arrived was not credited")
+}
+
+// THE SELLER'S FALLACY, stated as arithmetic.
+//
+// Move 500 USDT to the futures wallet, then buy with what is left. The balance must be
+// exactly what the fills alone would leave: the transfer is not a sale, so it neither spends
+// the asset nor makes the later fills unaffordable.
+func TestATransferOutFollowedByFillsLeavesWhatTheFillsAloneWouldLeave(t *testing.T) {
+	buy := fill(ledger.SideBuy, "0.01", "60000")
+
+	withTransfer := fold(t,
+		[]ledger.Event{transfer("spot", "usdm", "500"), buy},
+		[]balance.Resolved{{}, legs()})
+	fillsAlone := fold(t,
+		[]ledger.Event{buy},
+		[]balance.Resolved{legs()})
+
+	require.Equal(t, fillsAlone, withTransfer,
+		"the transfer changed the balance the fills produced")
+	require.Equal(t, map[int64]string{btc: "0.01", usdt: "-600"}, withTransfer)
+}
+
+// A transfer naming one endpoint cannot be folded: whether the money moved is exactly the
+// comparison between the two, and with one of them missing there is nothing to compare.
+// The schema refuses this shape too (00020); the engine refuses it because a pure function
+// that trusts its caller to have a constraint is not pure, it is lucky.
+func TestATransferMissingAnEndpointIsRefused(t *testing.T) {
+	for _, tc := range [][2]string{{"", ""}, {"spot", ""}, {"", "usdm"}} {
+		_, err := balance.Deltas(transfer(tc[0], tc[1], "500"), balance.Resolved{})
+		require.ErrorIs(t, err, balance.ErrMalformedEvent, "%q -> %q was folded", tc[0], tc[1])
+	}
+}
+
+// Both sides outside this integration is not a movement of this account's money, and it is
+// not an internal transfer either -- it is a normalizer that lost track of which side of the
+// wire it was on. Folding it to nothing would hide that.
+func TestATransferBetweenTwoOutsidesIsRefused(t *testing.T) {
+	_, err := balance.Deltas(transfer("external", "external", "500"), balance.Resolved{})
+	require.ErrorIs(t, err, balance.ErrMalformedEvent)
+}
+
+// A negative quantity is the retired convention showing up again. With the direction on the
+// endpoints, a sign can only disagree with them, and the disagreement would be silent: a
+// withdrawal of -500 would read as money arriving.
+func TestATransferWithASignedQuantityIsRefused(t *testing.T) {
+	_, err := balance.Deltas(transfer("spot", "external", "-500"), balance.Resolved{})
+	require.ErrorIs(t, err, balance.ErrMalformedEvent)
 }
 
 // Better a halted fold than a quietly incomplete one -- the same rule internal/position
