@@ -1,0 +1,59 @@
+{
+  "_source": "documented",
+  "_endpoint": "/fapi/v1/userTrades",
+  "_why": "the Account Trade List response fields, transcribed on 2026-09-10 (F18), with a buy and a sell and one row in hedge mode. positionSide is BOTH in one-way mode, which is V1's only mode; the LONG row exists so the refusal has something to refuse.",
+  "_note_realized_pnl": "realizedPnl is present here and deliberately NOT stored on the event. K5 computes realized PnL from the average-cost fold; the venue's copy is a reconciliation input (M7). Kept in raw forever (L15).",
+  "payload": [
+    {
+      "symbol": "BTCUSDT",
+      "id": 8886774,
+      "orderId": 652521,
+      "side": "BUY",
+      "price": "60000.00",
+      "qty": "0.500",
+      "quoteQty": "30000.00",
+      "realizedPnl": "0",
+      "marginAsset": "USDT",
+      "commission": "12.00",
+      "commissionAsset": "USDT",
+      "time": 1757400000000,
+      "positionSide": "BOTH",
+      "buyer": true,
+      "maker": false
+    },
+    {
+      "symbol": "BTCUSDT",
+      "id": 8886775,
+      "orderId": 652522,
+      "side": "SELL",
+      "price": "62000.00",
+      "qty": "0.250",
+      "quoteQty": "15500.00",
+      "realizedPnl": "500.00",
+      "marginAsset": "USDT",
+      "commission": "6.20",
+      "commissionAsset": "USDT",
+      "time": 1757400600000,
+      "positionSide": "BOTH",
+      "buyer": false,
+      "maker": true
+    },
+    {
+      "symbol": "BTCUSDT",
+      "id": 8886776,
+      "orderId": 652523,
+      "side": "BUY",
+      "price": "61000.00",
+      "qty": "0.100",
+      "quoteQty": "6100.00",
+      "realizedPnl": "0",
+      "marginAsset": "USDT",
+      "commission": "2.44",
+      "commissionAsset": "USDT",
+      "time": 1757401200000,
+      "positionSide": "LONG",
+      "buyer": true,
+      "maker": false
+    }
+  ]
+}

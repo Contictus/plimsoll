@@ -334,38 +334,10 @@ func buildTrade(
 		return ledger.Event{}, fmt.Errorf("normalize %s trade %d: %w", f.symbol, f.tradeID, err)
 	}
 
-	fee, err := parseFee(f.fee, f.feeAsset)
+	fee, feeAsset, feeAssetID, err := resolveFee(ctx, r, f.fee, f.feeAsset, eventTime)
 	if err != nil {
-		return ledger.Event{}, fmt.Errorf("%w: %s trade %d fee: %v",
-			ErrMalformedTrade, f.symbol, f.tradeID, err)
-	}
-	feeAsset := f.feeAsset
-	if !fee.Valid {
-		// fee and fee_asset are null together or not at all.
-		feeAsset = ""
-	}
-
-	// Resolved here and not at fold time, because here is where the event's own time is
-	// unambiguously in hand (L8, K22). Resolving it later means resolving it with whatever
-	// mapping is current then, which is the industry's number-one silent corruption.
-	//
-	// An unknown ticker is swallowed on purpose, and only that one: a coin we have not
-	// curated yet must not cost us the fill, which is the irreplaceable half. The fee's
-	// balance effect is then refused rather than guessed, and the reader is told
-	// (unknown_symbol, L11). Any other error -- the database being unreachable, say --
-	// still fails the normalization, because silently dropping every fee for the duration
-	// of an outage is not the same thing at all.
-	var feeAssetID *int64
-	if feeAsset != "" {
-		id, err := r.Asset(ctx, feeAsset, eventTime)
-		switch {
-		case err == nil:
-			feeAssetID = &id
-		case errors.Is(err, asset.ErrUnknownSymbol):
-		default:
-			return ledger.Event{}, fmt.Errorf("normalize %s trade %d fee asset: %w",
-				f.symbol, f.tradeID, err)
-		}
+		return ledger.Event{}, fmt.Errorf("normalize %s trade %d fee: %w",
+			f.symbol, f.tradeID, err)
 	}
 
 	return ledger.Event{
@@ -444,4 +416,46 @@ func parseFee(raw, asset string) (decimal.NullDecimal, error) {
 		return decimal.NullDecimal{}, fmt.Errorf("fee %s has no asset", amount)
 	}
 	return decimal.NullDecimal{Decimal: amount, Valid: true}, nil
+}
+
+// resolveFee parses a fee and resolves the asset it was paid in, as of the event's own
+// event_time (L8, K22). Shared by every normalizer, because "what happens when a fee's
+// ticker is not in the registry" is one rule (K45) and a second implementation of it is a
+// second answer.
+//
+// Resolved here rather than at fold time, because here is where the event's own time is
+// unambiguously in hand. Resolving it later means resolving it with whatever mapping is
+// current then, which is the industry's number-one silent corruption.
+//
+// An unknown ticker is swallowed on purpose, and only that one: a coin we have not curated
+// yet must not cost us the fill, which is the irreplaceable half. The fee's balance effect is
+// then refused rather than guessed, and the reader is told (unknown_symbol, L11). Any other
+// error -- the database being unreachable, say -- still fails the normalization, because
+// silently dropping every fee for the duration of an outage is not the same thing at all.
+func resolveFee(
+	ctx context.Context, r AssetResolver, rawFee, rawAsset string, eventTime time.Time,
+) (decimal.NullDecimal, string, *int64, error) {
+	fee, err := parseFee(rawFee, rawAsset)
+	if err != nil {
+		return decimal.NullDecimal{}, "", nil, fmt.Errorf("%w: %v", ErrMalformedTrade, err)
+	}
+
+	feeAsset := rawAsset
+	if !fee.Valid {
+		// fee and fee_asset are null together or not at all.
+		feeAsset = ""
+	}
+
+	var feeAssetID *int64
+	if feeAsset != "" {
+		id, err := r.Asset(ctx, feeAsset, eventTime)
+		switch {
+		case err == nil:
+			feeAssetID = &id
+		case errors.Is(err, asset.ErrUnknownSymbol):
+		default:
+			return decimal.NullDecimal{}, "", nil, fmt.Errorf("asset %q: %w", feeAsset, err)
+		}
+	}
+	return fee, feeAsset, feeAssetID, nil
 }

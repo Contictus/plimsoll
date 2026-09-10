@@ -3,8 +3,14 @@ package binance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
+
+	"github.com/Contictus/plimsoll/backend/internal/instrument"
+	"github.com/Contictus/plimsoll/backend/internal/ledger"
+	"github.com/shopspring/decimal"
 )
 
 // weightFuturesExchangeInfo is GET /fapi/v1/exchangeInfo, verified on 2026-09-10 (F14's
@@ -113,4 +119,145 @@ func (c *Client) FuturesExchangeInfo(ctx context.Context) (json.RawMessage, erro
 		weight:  weightFuturesExchangeInfo,
 		futures: true,
 	})
+}
+
+// ErrHedgeMode means the account is in hedge mode, which V1 does not model.
+//
+// A hedge-mode account reports LONG and SHORT rows for one symbol; this fold keeps one
+// position per instrument, so folding both sides into it averages a long and a short
+// together and reports a position that is FLAT while the account carries two live exposures.
+// The refusal is loud because the alternative is an import that half works: the numbers
+// would be there, plausible, and describing an account that does not exist.
+var ErrHedgeMode = errors.New("binance: hedge mode is not modelled in V1 (one-way only)")
+
+// positionSideOneWay is what the venue reports for every position in one-way mode.
+const positionSideOneWay = "BOTH"
+
+// futuresTradeRow is one element of a userTrades response (F18). Every money field stays a
+// string until it reaches decimal (L1).
+type futuresTradeRow struct {
+	Symbol string `json:"symbol"`
+	ID     int64  `json:"id"`
+
+	// Side is the authoritative direction. `buyer` says the same thing today and is a
+	// derived field; reading it instead would rest on that agreement, which is exactly the
+	// reading that breaks quietly when a venue changes what it derives.
+	Side  string `json:"side"`
+	Price string `json:"price"`
+	Qty   string `json:"qty"`
+
+	Commission      string `json:"commission"`
+	CommissionAsset string `json:"commissionAsset"`
+
+	// RealizedPnl is read off the wire and deliberately never stored on the event. The
+	// position engine computes realized PnL from the average-cost fold (K5); keeping the
+	// venue's copy too would be two numbers for one fact, and the fold would either
+	// disagree with it or be replaced by it -- the second source of truth L3 forbids. It
+	// survives in raw forever (L15), which is what makes it M7's reconciliation input.
+	RealizedPnl string `json:"realizedPnl"`
+
+	PositionSide string `json:"positionSide"`
+	Time         int64  `json:"time"`
+}
+
+// NormalizeFuturesTrade turns one USD-M userTrades row into a canonical event.
+//
+// It resolves in the USD-M market, never in whichever market a caller passes: spot BTCUSDT
+// and perp BTCUSDT are the same string and different instruments, and resolving a perp fill
+// against the spot alias attaches a leveraged position's quantity to a spot one (K10, L8).
+//
+// raw is stored verbatim (L15).
+func NormalizeFuturesTrade(
+	ctx context.Context, r Resolver, ic IngestContext, raw json.RawMessage,
+) (ledger.Event, error) {
+	var row futuresTradeRow
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return ledger.Event{}, fmt.Errorf("%w: decode userTrades element: %v", ErrMalformedTrade, err)
+	}
+
+	if row.PositionSide != "" && row.PositionSide != positionSideOneWay {
+		return ledger.Event{}, fmt.Errorf("%w: trade %d on %s reports positionSide %q",
+			ErrHedgeMode, row.ID, row.Symbol, row.PositionSide)
+	}
+	if row.ID == 0 {
+		return ledger.Event{}, fmt.Errorf(
+			"%w: futures fill has no trade id, so it has no identity", ErrMalformedTrade)
+	}
+	if row.Symbol == "" {
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d names no symbol",
+			ErrMalformedTrade, row.ID)
+	}
+	if row.Time <= 0 {
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d has no exchange timestamp",
+			ErrMalformedTrade, row.ID)
+	}
+
+	var side ledger.Side
+	switch row.Side {
+	case "BUY":
+		side = ledger.SideBuy
+	case "SELL":
+		side = ledger.SideSell
+	default:
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d has side %q",
+			ErrMalformedTrade, row.ID, row.Side)
+	}
+
+	quantity, err := parseAmount(row.Qty)
+	if err != nil {
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d quantity: %v",
+			ErrMalformedTrade, row.ID, err)
+	}
+	price, err := parseAmount(row.Price)
+	if err != nil {
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d price: %v",
+			ErrMalformedTrade, row.ID, err)
+	}
+	if !quantity.IsPositive() || !price.IsPositive() {
+		// The side carries the direction; the numbers carry the size. A signed quantity
+		// here would be a second statement of the direction, free to disagree with it.
+		return ledger.Event{}, fmt.Errorf("%w: futures fill %d is %s at %s",
+			ErrMalformedTrade, row.ID, quantity, price)
+	}
+
+	eventTime := time.UnixMilli(row.Time).UTC()
+	instrumentID, err := r.Instrument(ctx, instrument.MarketUSDM, row.Symbol, eventTime)
+	if err != nil {
+		return ledger.Event{}, fmt.Errorf("normalize usdm trade %d (%s): %w",
+			row.ID, row.Symbol, err)
+	}
+
+	fee, feeAsset, feeAssetID, err := resolveFee(ctx, r, row.Commission, row.CommissionAsset, eventTime)
+	if err != nil {
+		return ledger.Event{}, fmt.Errorf("normalize usdm trade %d fee: %w", row.ID, err)
+	}
+
+	return ledger.Event{
+		AccountID:     ic.AccountID,
+		IntegrationID: ic.IntegrationID,
+
+		VenueEventID:  FuturesTradeID(row.Symbol, row.ID),
+		VenueSequence: row.ID,
+		Source:        ic.Source,
+
+		EventType:    ledger.TypeTrade,
+		InstrumentID: &instrumentID,
+		Side:         side,
+
+		Quantity: decimal.NullDecimal{Decimal: quantity, Valid: true},
+		Price:    decimal.NullDecimal{Decimal: price, Valid: true},
+
+		Fee:        fee,
+		FeeAsset:   feeAsset,
+		FeeAssetID: feeAssetID,
+
+		EventTime: eventTime,
+		Raw:       raw,
+	}, nil
+}
+
+// FuturesTradeID is the canonical identity of a USD-M fill. The market prefix is what keeps
+// it from colliding with the spot fill of the same ticker and id (K19, L5).
+func FuturesTradeID(symbol string, tradeID int64) string {
+	return fmt.Sprintf("usdm:trade:%s:%d", symbol, tradeID)
 }

@@ -94,16 +94,16 @@ Every task's requirements implicitly include this section.
 - Produces: `binance.NormalizeFuturesTrade(ctx, r, ic, raw) (ledger.Event, error)`,
   `binance.FuturesTradeID(symbol string, id int64) string`.
 
-- [ ] **Step 1: Failing test — one `userTrades` row becomes one TRADE**, identity
+- [x] **Step 1: Failing test — one `userTrades` row becomes one TRADE**, identity
   `usdm:trade:<symbol>:<id>`, side from `side` rather than from `buyer`, commission on the
   event in `commissionAsset` (L9).
-- [ ] **Step 2: Failing test — `realizedPnl` is NOT stored.** The engine computes it (K5);
+- [x] **Step 2: Failing test — `realizedPnl` is NOT stored.** The engine computes it (K5);
   storing the venue's copy would be a second source of truth and, folded, a doubled number.
   The test asserts the field is absent from the event and present in `raw` (L15).
-- [ ] **Step 3: Failing test — a `positionSide` other than `BOTH` is refused.** V1 is one-way
+- [x] **Step 3: Failing test — a `positionSide` other than `BOTH` is refused.** V1 is one-way
   mode. Hedge mode's two-sided position is a different fold, and silently averaging the two
   sides together produces a position that is flat when it is not.
-- [ ] **Step 4: Implement. Commit.**
+- [x] **Step 4: Implement. Commit.**
 
 ---
 
