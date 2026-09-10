@@ -58,7 +58,8 @@ func run(log *slog.Logger) error {
 	// there is one implementation of "what a valid KEK looks like", so a process cannot
 	// boot here and then be unable to decrypt a single credential. Task 2 of M2 hands the
 	// provider to the connect flow; until then its construction is the whole value.
-	if _, err := crypto.NewEnvFileProvider(); err != nil {
+	keys, err := crypto.NewEnvFileProvider()
+	if err != nil {
 		return err
 	}
 
@@ -96,6 +97,10 @@ func run(log *slog.Logger) error {
 		DB:   pool,
 		Auth: auth.NewService(store.New(pool), pool, sessionTTL),
 		Now:  time.Now,
+		// Sealing only. The API never opens a stored secret: reading a credential is the
+		// worker's job, and a process that cannot decrypt is one a leaked session cannot
+		// make decrypt.
+		Keys: keys,
 	})
 
 	srv := &http.Server{

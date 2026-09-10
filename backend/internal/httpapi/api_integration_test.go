@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
+	"github.com/Contictus/plimsoll/backend/internal/crypto"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/google/uuid"
@@ -33,11 +34,17 @@ func newServerWithPegs(t *testing.T, pegs string) *httptest.Server {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
+	// The key provider is the process's own, read from the environment: a channel secret
+	// sealed by a test server is sealed exactly as the real one seals it (K25).
+	keys, err := crypto.NewEnvFileProvider()
+	require.NoError(t, err)
+
 	srv := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
 		DB:        pool,
 		Auth:      auth.NewService(store.New(pool), pool, 24*time.Hour),
 		Now:       time.Now,
 		PegAssets: pegs,
+		Keys:      keys,
 	}))
 	t.Cleanup(srv.Close)
 	return srv
