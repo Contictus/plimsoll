@@ -41,6 +41,11 @@ type eventBody struct {
 	Fee      string `json:"fee"`
 	FeeAsset string `json:"fee_asset"`
 
+	// The two wallets a transfer ran between, empty on everything else. A transfer folds to
+	// no delta, so it changes no total; these two fields are the whole of what it says.
+	TransferFrom string `json:"transfer_from" doc:"set on a TRANSFER: spot, usdm, coinm, margin, funding or external"`
+	TransferTo   string `json:"transfer_to"   doc:"the other endpoint of the same transfer"`
+
 	EventTime  time.Time `json:"event_time"`
 	IngestedAt time.Time `json:"ingested_at"`
 }
@@ -127,6 +132,8 @@ func renderEvent(tx portfolio.Transaction) eventBody {
 		Price:         tx.Price,
 		Fee:           tx.Fee,
 		FeeAsset:      tx.FeeAsset,
+		TransferFrom:  tx.TransferFrom,
+		TransferTo:    tx.TransferTo,
 		EventTime:     tx.EventTime,
 		IngestedAt:    tx.IngestedAt,
 	}

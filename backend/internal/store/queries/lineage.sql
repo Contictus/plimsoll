@@ -28,7 +28,7 @@ LIMIT sqlc.arg(max_rows);
 -- position in the listing.
 SELECT e.seq, e.integration_id, e.venue_event_id, e.venue_sequence, e.source, e.event_type,
        e.instrument_id, e.asset_id, e.side, e.quantity, e.price, e.fee, e.fee_asset,
-       e.event_time, e.ingested_at,
+       e.transfer_from, e.transfer_to, e.event_time, e.ingested_at,
        i.canonical_symbol AS instrument_symbol,
        a.canonical_symbol AS asset_symbol
 FROM ledger_events e

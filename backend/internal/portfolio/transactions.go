@@ -91,6 +91,13 @@ type Transaction struct {
 	Fee      string
 	FeeAsset string
 
+	// TransferFrom and TransferTo name the two wallets a TRANSFER ran between, and are
+	// empty on everything else. They are the whole visible content of a transfer: it folds
+	// to no delta, so it moves no total, and this listing is the only place a reader meets
+	// it at all.
+	TransferFrom string
+	TransferTo   string
+
 	EventTime  time.Time
 	IngestedAt time.Time
 }
@@ -177,6 +184,8 @@ func LoadTransactions(
 				Price:         text(r.Price),
 				Fee:           text(r.Fee),
 				FeeAsset:      deref(r.FeeAsset),
+				TransferFrom:  deref(r.TransferFrom),
+				TransferTo:    deref(r.TransferTo),
 				EventTime:     r.EventTime,
 				IngestedAt:    r.IngestedAt,
 			})
