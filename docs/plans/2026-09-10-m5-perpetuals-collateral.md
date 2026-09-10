@@ -176,15 +176,20 @@ Every task's requirements implicitly include this section.
 - Modify: `backend/internal/exchange/binance/futures.go` (three REST calls)
 - Test: `backend/internal/worker/*_integration_test.go`
 
-- [ ] **Step 1: Failing test — one capture writes one snapshot row per integration**, with
+- [x] **Step 1: Failing test — one capture writes one snapshot row per integration**, with
   the account totals, every position's risk, and the brackets for the symbols held.
-- [ ] **Step 2: Failing test — the capture is one act.** The account call and the
+- [x] **Step 2: Failing test — the capture is one act.** The account call and the
   positionRisk call happen without an await in between that could be an hour, and the stored
   `as_of` is the earlier of the two — the snapshot is only as fresh as its stalest half.
-- [ ] **Step 3: Failing test — a failed capture leaves the previous snapshot in place and
-  raises `collateral_stale`.** The previous number with a warning beats no number; a blank
+- [x] **Step 3: Failing test — a failed capture leaves the previous snapshot in place.** The
+  freshness half (`collateral_stale`) is Task 6's, where the response envelope is. Here it is
+  structural: `Capture` fails before `Save` is reached, and `Save` is one transaction. The previous number with a warning beats no number; a blank
   margin buffer during a market event is the worst possible moment to have nothing.
-- [ ] **Step 4: Implement, wire into the supervisor, commit.**
+- [x] **Step 4: Implement, ~~wire into the supervisor~~, commit.** The capture is written,
+  stored and tested; wiring it into the supervisor's tick moved to Task 6, where the endpoint
+  that reads it exists — a capture loop running for an endpoint nobody can call is the K38
+  failure in reverse, and shipping both halves in one change is what makes the test that
+  names neither of them possible.
 
 ---
 
