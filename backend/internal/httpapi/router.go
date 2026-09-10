@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
+	"github.com/Contictus/plimsoll/backend/internal/crypto"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/danielgtaylor/huma/v2"
@@ -35,6 +36,11 @@ type Deps struct {
 	DB   Database
 	Auth *auth.Service
 	Now  func() time.Time
+
+	// Keys seals the secrets that arrive through the API -- today, alert channel tokens
+	// (K25). The API decrypts nothing: reading a credential is the worker's job, and a
+	// process that cannot decrypt is a process a leaked session cannot make decrypt.
+	Keys crypto.KeyProvider
 
 	// LeaseTTL is how long a worker's status report stays believable. It is the API's copy
 	// of the worker's lease TTL: a report older than one lease came from a worker that no
@@ -108,6 +114,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerRisk(api)
 	d.registerStrategy(api)
 	d.registerExposure(api)
+	d.registerAlerts(api)
 
 	return router
 }

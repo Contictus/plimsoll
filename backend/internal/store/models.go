@@ -27,6 +27,56 @@ type AccountCredential struct {
 	UpdatedAt    time.Time
 }
 
+type Alert struct {
+	ID            uuid.UUID
+	AccountID     uuid.UUID
+	RuleID        uuid.UUID
+	Kind          string
+	Metric        string
+	ScopeKind     string
+	ScopeName     string
+	Value         decimal.NullDecimal
+	RunID         *int64
+	FiredAt       time.Time
+	DeliveredAt   *time.Time
+	DeliveryError *string
+}
+
+type AlertChannel struct {
+	ID               uuid.UUID
+	AccountID        uuid.UUID
+	Kind             string
+	Label            string
+	Enabled          bool
+	ConfigCiphertext []byte
+	WrappedDek       []byte
+	KeyVersion       int32
+	CreatedAt        time.Time
+}
+
+type AlertRule struct {
+	ID              uuid.UUID
+	AccountID       uuid.UUID
+	Name            string
+	Metric          string
+	ScopeKind       string
+	ScopeName       string
+	Comparator      string
+	TriggerAt       decimal.Decimal
+	ClearAt         decimal.Decimal
+	CooldownSeconds int32
+	Enabled         bool
+	CreatedAt       time.Time
+}
+
+type AlertState struct {
+	RuleID      uuid.UUID
+	AccountID   uuid.UUID
+	Firing      bool
+	Since       *time.Time
+	LastFiredAt *time.Time
+}
+
 type Asset struct {
 	ID                int64
 	CanonicalSymbol   string

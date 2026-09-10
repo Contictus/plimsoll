@@ -137,6 +137,15 @@ func run(log *slog.Logger) error {
 		runValuations(ctx, pool, log)
 	}()
 
+	// Alerting goes beside the valuation loop rather than inside it: it reads completed runs
+	// (ARCHITECTURE section 7) and it must keep evaluating while runs are failing, because
+	// "the price feed stopped" is itself a thing a user's rules can be watching for.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runAlerts(ctx, pool, d.keys, log)
+	}()
+
 	for _, assignment := range assignments {
 		wg.Add(1)
 		go func() {

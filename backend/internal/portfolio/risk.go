@@ -348,6 +348,16 @@ type Exposure struct {
 	// an account worth nothing (L11).
 	Equity decimal.NullDecimal
 	Report risk.Report
+
+	// Run is the valuation this was priced from, nil when none has completed. The alert
+	// runner needs it: alerts evaluate on completed runs and not per tick (ARCHITECTURE
+	// section 7), because a per-tick alert fires on prices that never entered a published
+	// total -- a message about a number the user was never shown.
+	Run *PriceRun
+
+	// Collateral is each integration's margin picture as it stood, so a rule on the margin
+	// buffer reads the same snapshot /risk renders.
+	Collateral []CollateralSnapshot
 }
 
 // LoadExposure marks the account once and measures it, portfolio-wide and per strategy.
@@ -387,7 +397,11 @@ func LoadExposure(
 		snapshots = make([]CollateralSnapshot, 0, len(rows))
 		for _, s := range rows {
 			snapshots = append(snapshots, CollateralSnapshot{
-				IntegrationID: s.IntegrationID, AsOf: s.AsOf, UnrealizedPnL: s.UnrealizedPnl,
+				IntegrationID:     s.IntegrationID,
+				AsOf:              s.AsOf,
+				MarginBalance:     s.MarginBalance,
+				MaintenanceMargin: s.MaintenanceMargin,
+				UnrealizedPnL:     s.UnrealizedPnl,
 			})
 		}
 		return nil
@@ -397,7 +411,7 @@ func LoadExposure(
 	}
 
 	p := Build(in)
-	out := Exposure{AsOf: p.AsOf, Freshness: p.Freshness}
+	out := Exposure{AsOf: p.AsOf, Freshness: p.Freshness, Run: p.Prices, Collateral: snapshots}
 	reasons := append([]freshness.Reason{}, p.Freshness.Reasons...)
 
 	positions := make([]risk.Position, 0, len(p.Holdings))
