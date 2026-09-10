@@ -11,6 +11,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
 	"github.com/Contictus/plimsoll/backend/internal/crypto"
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/danielgtaylor/huma/v2"
@@ -41,6 +42,10 @@ type Deps struct {
 	// (K25). The API decrypts nothing: reading a credential is the worker's job, and a
 	// process that cannot decrypt is a process a leaked session cannot make decrypt.
 	Keys crypto.KeyProvider
+
+	// Events is the live-update bus. Nil in a process that serves no streams -- and nil in a
+	// test that does not need them, which is why it is an interface (K51).
+	Events events.Subscriber
 
 	// LeaseTTL is how long a worker's status report stays believable. It is the API's copy
 	// of the worker's lease TTL: a report older than one lease came from a worker that no
@@ -115,6 +120,9 @@ func NewRouter(d Deps) http.Handler {
 	d.registerStrategy(api)
 	d.registerExposure(api)
 	d.registerAlerts(api)
+
+	// Not a Huma operation: a response that never ends is not a value returned once (K51).
+	d.registerStreams(router)
 
 	return router
 }
