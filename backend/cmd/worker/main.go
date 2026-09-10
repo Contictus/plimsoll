@@ -218,13 +218,14 @@ func connect(
 	}
 
 	return deps{
-		pool:       pool,
-		keys:       keys,
-		limiter:    limiter,
-		symbols:    symbols,
-		restURL:    restURL,
-		futuresURL: envOr("PLIMSOLL_BINANCE_FUTURES_URL", binance.FuturesBaseURL),
-		wsURL:      envOr("PLIMSOLL_BINANCE_WS_URL", binance.SpotStreamURL),
+		pool:         pool,
+		keys:         keys,
+		limiter:      limiter,
+		symbols:      symbols,
+		restURL:      restURL,
+		futuresURL:   envOr("PLIMSOLL_BINANCE_FUTURES_URL", binance.FuturesBaseURL),
+		futuresWsURL: envOr("PLIMSOLL_BINANCE_FUTURES_WS_URL", binance.FuturesStreamURL),
+		wsURL:        envOr("PLIMSOLL_BINANCE_WS_URL", binance.SpotStreamURL),
 		// Process-unique, minted per start. Never a hostname: two processes on one host
 		// would then share an identity and each would believe it held the other's lease.
 		ownerID: uuid.NewString(),

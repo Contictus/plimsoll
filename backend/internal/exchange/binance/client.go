@@ -202,6 +202,16 @@ type request struct {
 	weight int
 	signed bool
 
+	// method defaults to GET. The listenKey endpoints are the only ones that are not, and
+	// they differ only by verb -- same path, same weight, three meanings.
+	method string
+
+	// keyed sends the API key header WITHOUT a signature. The listenKey endpoints are
+	// "USER_STREAM" security: the key identifies the account and there is nothing to sign,
+	// so signing anyway would be a signature the venue ignores and a secret used for
+	// nothing.
+	keyed bool
+
 	// futures sends this request to the USD-M host instead of the spot one. The two are
 	// separate services with separate IP weight budgets; this client charges both against
 	// one limiter, which over-counts rather than under-counts and is therefore the safe
@@ -300,12 +310,16 @@ func (c *Client) attempt(ctx context.Context, req request) (json.RawMessage, err
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	method := req.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		// target holds the signature, so it is deliberately not in the message.
 		return nil, fmt.Errorf("binance: %s: build request: %w", req.path, err)
 	}
-	if req.signed {
+	if req.signed || req.keyed {
 		httpReq.Header.Set(apiKeyHeader, c.cred.APIKey.Reveal())
 	}
 

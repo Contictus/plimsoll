@@ -65,6 +65,12 @@ type Client interface {
 	MyTrades(ctx context.Context, q binance.MyTradesQuery) (json.RawMessage, error)
 	DepositHistory(ctx context.Context, q binance.HistoryQuery) (json.RawMessage, error)
 	UniversalTransferHistory(ctx context.Context, q binance.TransferQuery) (json.RawMessage, error)
+
+	// The USD-M half. On the same interface rather than a second one because a walk is a
+	// walk: the runner drives them from one place, and two client interfaces would mean two
+	// fakes that could drift apart in what they consider a page.
+	FuturesUserTrades(ctx context.Context, q binance.FuturesTradesQuery) (json.RawMessage, error)
+	IncomeHistory(ctx context.Context, q binance.IncomeQuery) (json.RawMessage, error)
 }
 
 // Registry resolves exchange symbols and coin tickers to canonical ids, always as of the
@@ -93,6 +99,10 @@ type Deps struct {
 	// than 1000 -- a different endpoint with a different limit, so it does not share the
 	// other two's ceiling.
 	TransferPageSize int
+
+	// FuturesPageLimit caps the two USD-M history endpoints. Zero takes their documented
+	// maximum of 1000.
+	FuturesPageLimit int
 }
 
 // maxPageLimit is the cap both endpoints document (docs/BINANCE-API-NOTES.md section 2).
@@ -193,6 +203,12 @@ func commit(ctx context.Context, d Deps, t Target, events []ledger.Event, p Prog
 }
 
 func save(ctx context.Context, q *store.Queries, t Target, p Progress) error {
+	if p.Scope == "" {
+		// A write with no scope is a caller that appended events without walking anything --
+		// a resync. It has no cursor to advance, and inventing one would let a five-minute
+		// window mark a three-month walk complete.
+		return nil
+	}
 	if err := q.UpsertBackfillProgress(ctx, store.UpsertBackfillProgressParams{
 		AccountID:     t.AccountID,
 		IntegrationID: t.IntegrationID,

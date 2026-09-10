@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/asset"
@@ -82,6 +83,13 @@ func (f fakeTransfer) raw() json.RawMessage {
 type fakeClient struct {
 	trades   map[string][]fakeTrade // per symbol, ascending by id
 	deposits []fakeDeposit
+
+	income        []fakeIncome
+	futuresTrades []fakeFuturesTrade
+	failIncome    bool
+
+	incomeCalls       []binance.IncomeQuery
+	futuresTradeCalls []binance.FuturesTradesQuery
 
 	// newestOnZero makes fromId=0 return the most recent page. This is the behaviour the
 	// documentation neither promises nor rules out, and the one that would make a walk
@@ -303,4 +311,74 @@ func (r fakeRegistry) Asset(_ context.Context, symbol string, _ time.Time) (int6
 		return 0, fmt.Errorf("%w: fake registry has no asset for %s", asset.ErrUnknownSymbol, symbol)
 	}
 	return id, nil
+}
+
+// The USD-M half of the fake. Kept deliberately simple -- the futures walks are time-windowed
+// rather than id-paged, so what a test needs to drive them is "what rows fall in this window",
+// not the paging machinery the spot walk needs.
+type fakeIncome struct {
+	Symbol     string
+	IncomeType string
+	Income     string
+	Asset      string
+	At         time.Time
+	TranID     int64
+}
+
+type fakeFuturesTrade struct {
+	Symbol string
+	ID     int64
+	Price  string
+	Qty    string
+	Side   string
+	At     time.Time
+}
+
+func (c *fakeClient) IncomeHistory(
+	_ context.Context, q binance.IncomeQuery,
+) (json.RawMessage, error) {
+	c.incomeCalls = append(c.incomeCalls, q)
+	if c.failIncome {
+		return nil, errors.New("fake: income refused")
+	}
+	// Page 2 and beyond are empty: the fake never fills a page, so a walk that asked for
+	// one would be asking for a page it was told did not exist.
+	if q.Page > 1 {
+		return json.RawMessage(`[]`), nil
+	}
+
+	rows := make([]string, 0)
+	for _, row := range c.income {
+		if row.At.Before(q.StartTime) || !row.At.Before(q.EndTime) {
+			continue
+		}
+		rows = append(rows, fmt.Sprintf(
+			`{"symbol":%q,"incomeType":%q,"income":%q,"asset":%q,"time":%d,"tranId":%d}`,
+			row.Symbol, row.IncomeType, row.Income, row.Asset, row.At.UnixMilli(), row.TranID))
+	}
+	return json.RawMessage("[" + strings.Join(rows, ",") + "]"), nil
+}
+
+func (c *fakeClient) FuturesUserTrades(
+	_ context.Context, q binance.FuturesTradesQuery,
+) (json.RawMessage, error) {
+	c.futuresTradeCalls = append(c.futuresTradeCalls, q)
+
+	rows := make([]string, 0)
+	for _, row := range c.futuresTrades {
+		if row.Symbol != q.Symbol || row.At.Before(q.StartTime) || !row.At.Before(q.EndTime) {
+			continue
+		}
+		buyer := "false"
+		if row.Side == "buy" {
+			buyer = "true"
+		}
+		rows = append(rows, fmt.Sprintf(
+			`{"symbol":%q,"id":%d,"orderId":%d,"side":%q,"price":%q,"qty":%q,
+			  "realizedPnl":"0","quoteQty":"0","commission":"0.1","commissionAsset":"USDT",
+			  "time":%d,"positionSide":"BOTH","buyer":%s,"maker":false}`,
+			row.Symbol, row.ID, row.ID, strings.ToUpper(row.Side), row.Price, row.Qty,
+			row.At.UnixMilli(), buyer))
+	}
+	return json.RawMessage("[" + strings.Join(rows, ",") + "]"), nil
 }

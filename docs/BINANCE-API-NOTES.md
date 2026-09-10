@@ -666,6 +666,49 @@ average-cost fold (K5), so the venue's number is a **reconciliation input, not a
 input** — storing it as truth would create the second source of truth L3 forbids, and folding
 it as well as computing it would double the number.
 
+### F19 — the two USD-M history endpoints answer for three months, in seven-day windows
+
+`GET /fapi/v1/userTrades` (weight 5, signed): *"The time between `startTime` and `endTime`
+cannot be longer than 7 days"* · *"Only support querying trade in the past 3 months"* ·
+*"`fromId` cannot be sent with `startTime` or `endTime`"* · limit max 1000, default 500.
+
+`GET /fapi/v1/income` (weight **30**, signed): *"Income history only contains data for the last
+three months"* · default limit 100, max 1000, with a `page` parameter.
+
+Two consequences.
+
+**The futures fill walk is time-windowed, unlike spot's.** Spot pages by trade id because its
+history reaches back to 2017 and a time walk would be thousands of requests per symbol — which
+forced the F5 inference about what `fromId=0` returns, checked at runtime because the page does
+not say. Here the venue answers for three months at most, so thirteen windows cover the whole of
+what exists and nothing has to be inferred at all.
+
+**Income is walked before fills, because it is the discovery.** It takes no symbol and returns
+every cash flow at once, so one walk names every perpetual the account has touched. Sweeping the
+listed contracts instead would be several hundred symbols walked to find the four that matter —
+at weight 5 each, for nothing.
+
+The three-month horizon is `history_truncated`, not `backfill_incomplete`: it is a permanent
+claim about what can be known, and telling a user to wait for something that will not arrive is
+the confident-and-wrong failure L11 exists to reject.
+
+### F20 — Go's JSON decoder matches keys case-insensitively, and this venue uses `e` and `E`
+
+Found while writing the futures stream trigger, by a test that expected `"BTCUSDT"` and got
+`"BUY"`.
+
+`encoding/json` falls back to a **case-insensitive** match when no exact tag matches — and on
+this venue's WebSocket payloads the case is the field. `ORDER_TRADE_UPDATE` carries `e` (event
+type) beside `E` (event time), and its order object carries `s` (symbol) beside `S` (side). A
+struct tagged `json:"s"` is filled by whichever the decoder reaches: in practice the side. The
+symbol comes out as `BUY`, and everything downstream asks the venue about a contract that does
+not exist.
+
+Nothing else in the repository is affected — every other normalizer decodes the REST payloads,
+whose field names are words (`symbol`, `commissionAsset`) with no case-only twin. The rule for
+anything reading a WebSocket frame from this venue: **decode short keys through a
+`map[string]json.RawMessage` and index them exactly.** A tagged struct is not safe here.
+
 ### Still unverified for M5
 
 - The fifteen `incomeType` values the page refers to but does not render. Whitelisted rather

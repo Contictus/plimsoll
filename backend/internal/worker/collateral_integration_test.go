@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/instrument"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
@@ -216,4 +218,83 @@ func TestACaptureByAWorkerWithoutTheLeaseIsRefusedByTheWriteItself(t *testing.T)
 
 	_, stored := capturedBuffer(ownerPool(t), accountID, integrationID)
 	require.False(t, stored, "the intruder's capture was written anyway")
+}
+
+// fakeFuturesStream delivers frames on demand.
+type fakeFuturesStream struct{ messages chan binance.Message }
+
+func (f *fakeFuturesStream) Subscribe(context.Context) (<-chan binance.Message, error) {
+	return f.messages, nil
+}
+func (f *fakeFuturesStream) Connected() bool { return true }
+func (f *fakeFuturesStream) Close() error    { return nil }
+
+// recordingResyncer remembers which symbols were replayed.
+type recordingResyncer struct {
+	mu      sync.Mutex
+	symbols []string
+}
+
+func (r *recordingResyncer) ResyncSymbol(_ context.Context, symbol string, _, _ time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.symbols = append(r.symbols, symbol)
+	return nil
+}
+
+func (r *recordingResyncer) seen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.symbols...)
+}
+
+// A live USD-M fill triggers a bounded REST replay of that contract, and nothing else.
+//
+// The stream does not normalize the event. A fill's identity has to be the one the walk mints
+// (L5); a second spelling would double the position. So the event says WHICH contract moved
+// and the REST read says what happened -- a latency improvement that cannot invent a number.
+func TestALiveFuturesFillTriggersAResyncOfThatSymbol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedSpotInstrument(t)
+
+	futures := &fakeFuturesStream{messages: make(chan binance.Message, 4)}
+	resyncer := &recordingResyncer{}
+
+	s, err := worker.NewSupervisor(worker.SupervisorConfig{
+		DB:             appPool(t),
+		AccountID:      accountID,
+		IntegrationID:  integrationID,
+		OwnerID:        "worker-futures",
+		LeaseTTL:       leaseTTL,
+		HeartbeatEvery: 20 * time.Millisecond,
+		Stream:         newFakeStream(),
+		Ingest:         &tradeIngester{accountID: accountID, integrationID: integrationID, instrumentID: instrumentID},
+		Resync:         &fakeResyncer{},
+		Backfill:       doneStepper{},
+		FuturesStream:  futures,
+		FuturesResync:  resyncer,
+		Now:            func() time.Time { return supervisorNow },
+	})
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	eventually(t, "the supervisor to go live", func() bool { return s.State() == ingest.StateLive })
+
+	// A fill, an order acknowledgement, and an account update. Only the first is a fill.
+	futures.messages <- binance.Message{Event: json.RawMessage(
+		`{"e":"ORDER_TRADE_UPDATE","E":1789000000000,"o":{"s":"BTCUSDT","S":"BUY","x":"TRADE"}}`)}
+	futures.messages <- binance.Message{Event: json.RawMessage(
+		`{"e":"ACCOUNT_UPDATE","E":1789000000001,"a":{"B":[]}}`)}
+
+	eventually(t, "the fill to trigger a replay", func() bool {
+		return len(resyncer.seen()) == 1
+	})
+	require.Equal(t, []string{"BTCUSDT"}, resyncer.seen(),
+		"the symbol replayed is not the one the event named")
+
+	cancel()
+	require.NoError(t, <-done)
 }
