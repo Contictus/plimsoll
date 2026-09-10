@@ -1,0 +1,43 @@
+{
+  "_source": "documented",
+  "_endpoint": "/sapi/v1/asset/transfer",
+  "_why": "the example row printed on the Query User Universal Transfer History page, transcribed verbatim on 2026-09-09, then repeated with the variants the normalizer must treat differently. `type` is a required query parameter and a direction rather than a category, so one row already carries both endpoints (F10).",
+  "_status_note": "the page shows status as a string and gives exactly one value, CONFIRMED, in its response example. It does not enumerate the rest. PENDING below is therefore NOT a documented value -- it is a stand-in for `anything that is not CONFIRMED`, which the normalizer whitelists against rather than blacklists (F11).",
+  "payload": {
+    "total": 4,
+    "rows": [
+      {
+        "asset": "USDT",
+        "amount": "1",
+        "type": "MAIN_UMFUTURE",
+        "status": "CONFIRMED",
+        "tranId": 11415955596,
+        "timestamp": 1544433328000
+      },
+      {
+        "asset": "USDT",
+        "amount": "2",
+        "type": "UMFUTURE_MAIN",
+        "status": "CONFIRMED",
+        "tranId": 11366865406,
+        "timestamp": 1544433328000
+      },
+      {
+        "asset": "USDT",
+        "amount": "3",
+        "type": "MAIN_MARGIN",
+        "status": "PENDING",
+        "tranId": 11366865407,
+        "timestamp": 1544433329000
+      },
+      {
+        "asset": "USDT",
+        "amount": "4",
+        "type": "ISOLATEDMARGIN_MARGIN",
+        "status": "CONFIRMED",
+        "tranId": 11366865408,
+        "timestamp": 1544433330000
+      }
+    ]
+  }
+}
