@@ -859,6 +859,24 @@ buffer. M2 shipped a projector nothing called (K38) and the symptom was an endpo
 "you hold nothing" for a full account. A capture loop with no reader is the same defect facing
 the other way, and it is invisible for exactly as long.
 
+### K51 - SSE fans out over LISTEN/NOTIFY, and Redis waits for a second replica · `qualifies K28`
+
+K28 gives Redis exactly two jobs: the latest-price hash and SSE fan-out. M4 put prices in
+Postgres and never needed the first, so adding the container now would be a service run for
+one job.
+
+`LISTEN/NOTIFY` does that job on a single-VPS deployment with one `api` process: the worker
+notifies on its own transaction, the API holds one dedicated connection per account with a
+subscriber, and nothing durable is involved -- which is the whole of what K28 requires of the
+transport. The day a second `api` replica exists this becomes wrong in a specific and visible
+way (each replica only hears what its own connection is listening for), and that is the day
+Redis earns its container.
+
+**The payload is a hint, never the numbers.** A subscriber is told "portfolio changed" and
+re-reads through the authenticated endpoint. Pushing the numbers down the channel would put a
+second, unversioned copy of the API contract on the wire -- one that no `freshness` envelope
+travels with, and a second place for a tenancy mistake to live.
+
 ---
 
 ## Deliberately Out of Scope
