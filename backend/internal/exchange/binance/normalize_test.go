@@ -31,6 +31,11 @@ type fakeResolver struct {
 	calls        []resolveCall
 	assetWindows []aliasWindow
 	assetCalls   []resolveCall
+
+	// markets records which market each Instrument lookup asked for. Spot BTCUSDT and perp
+	// BTCUSDT are the same string, so "which market" is as much a part of the question as
+	// "which symbol" (K10).
+	markets []instrument.Market
 }
 
 // Asset resolves a coin ticker the same way, and records the instant it was asked for.
@@ -66,9 +71,10 @@ type resolveCall struct {
 }
 
 func (f *fakeResolver) Instrument(
-	_ context.Context, _ instrument.Market, symbol string, at time.Time,
+	_ context.Context, market instrument.Market, symbol string, at time.Time,
 ) (int64, error) {
 	f.calls = append(f.calls, resolveCall{symbol, at})
+	f.markets = append(f.markets, market)
 	for _, w := range f.windows {
 		if w.symbol != symbol {
 			continue

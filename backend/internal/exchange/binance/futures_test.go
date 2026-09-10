@@ -6,6 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/Contictus/plimsoll/backend/internal/instrument"
+	"github.com/Contictus/plimsoll/backend/internal/ledger"
+	"github.com/shopspring/decimal"
 
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/stretchr/testify/require"
@@ -101,4 +106,144 @@ func TestAFuturesRequestGoesToTheFuturesHost(t *testing.T) {
 	_, err := client.FuturesExchangeInfo(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "/fapi/v1/exchangeInfo", asked)
+}
+
+const usdmBTCUSDT int64 = 501
+
+// futuresTrades returns the fixture's rows: [0] a buy, [1] a sell that realized PnL,
+// [2] a hedge-mode row.
+func futuresTrades(t *testing.T) []json.RawMessage {
+	t.Helper()
+	var rows []json.RawMessage
+	require.NoError(t, json.Unmarshal(loadFixture(t, "user_trades_usdm.json", "payload"), &rows))
+	require.Len(t, rows, 3)
+	return rows
+}
+
+func usdmResolver(t *testing.T) *fakeResolver {
+	t.Helper()
+	r := assetResolverFor("USDT", usdtAsset)
+	r.windows = []aliasWindow{{
+		symbol:     "BTCUSDT",
+		from:       time.Unix(0, 0),
+		to:         time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC),
+		instrument: usdmBTCUSDT,
+	}}
+	return r
+}
+
+func normalizeFuturesTrade(t *testing.T, raw json.RawMessage) (ledger.Event, error) {
+	t.Helper()
+	tc := testContext()
+	tc.Source = binance.SourceREST
+	return binance.NormalizeFuturesTrade(context.Background(), usdmResolver(t), tc, raw)
+}
+
+// One userTrades row is one TRADE, under the usdm market so it can never collide with the
+// spot fill of the same ticker (K10, L8).
+func TestAFuturesFillMapsEveryField(t *testing.T) {
+	raw := futuresTrades(t)[0]
+
+	event, err := normalizeFuturesTrade(t, raw)
+	require.NoError(t, err)
+
+	require.Equal(t, ledger.TypeTrade, event.EventType)
+	require.Equal(t, "usdm:trade:BTCUSDT:8886774", event.VenueEventID)
+	require.Equal(t, int64(8886774), event.VenueSequence)
+	require.NotNil(t, event.InstrumentID)
+	require.Equal(t, usdmBTCUSDT, *event.InstrumentID)
+	require.Equal(t, ledger.SideBuy, event.Side)
+	require.True(t, event.Quantity.Decimal.Equal(decimal.RequireFromString("0.500")))
+	require.True(t, event.Price.Decimal.Equal(decimal.RequireFromString("60000.00")))
+	require.Equal(t, time.UnixMilli(1757400000000).UTC(), event.EventTime.UTC())
+
+	// The commission rides on the fill that caused it and is never folded into the price
+	// (K18, L9).
+	require.True(t, event.Fee.Decimal.Equal(decimal.RequireFromString("12.00")))
+	require.Equal(t, "USDT", event.FeeAsset)
+	require.NotNil(t, event.FeeAssetID)
+
+	require.Equal(t, []byte(raw), []byte(event.Raw))
+}
+
+// The instrument is looked up in the USD-M market, not in whatever market the caller
+// happened to pass. Spot BTCUSDT and perp BTCUSDT are the same string and different
+// instruments; resolving a perp fill against the spot alias attaches a leveraged position's
+// quantity to a spot one, and both numbers are then wrong while looking plausible.
+func TestAFuturesFillResolvesInTheFuturesMarket(t *testing.T) {
+	r := usdmResolver(t)
+	tc := testContext()
+
+	_, err := binance.NormalizeFuturesTrade(context.Background(), r, tc, futuresTrades(t)[0])
+	require.NoError(t, err)
+
+	require.NotEmpty(t, r.markets)
+	require.Equal(t, instrument.MarketUSDM, r.markets[0],
+		"a perp fill was resolved in the wrong market")
+}
+
+// K5 AND L3, in one assertion.
+//
+// The venue sends realizedPnl on the fill and the position engine computes realized PnL
+// itself from the average-cost fold. Storing the venue's copy would put two numbers for one
+// fact in the system, and the fold would then either disagree with it -- a finding nobody
+// asked for -- or be replaced by it, which is the second source of truth L3 forbids.
+//
+// It survives in raw forever (L15), which is what makes it a reconciliation input for M7
+// rather than something thrown away.
+func TestTheVenuesRealizedPnLIsNotStoredOnTheEvent(t *testing.T) {
+	event, err := normalizeFuturesTrade(t, futuresTrades(t)[1])
+	require.NoError(t, err)
+
+	require.Equal(t, ledger.SideSell, event.Side)
+	require.True(t, event.Price.Decimal.Equal(decimal.RequireFromString("62000.00")))
+
+	// There is no column it could have gone into, so the assertion is on the payload: the
+	// fixture's row carries 500.00 and the event carries no 500 anywhere.
+	require.NotContains(t, event.Quantity.Decimal.String(), "500.00")
+	require.Contains(t, string(event.Raw), `"realizedPnl": "500.00"`,
+		"the venue's number must survive in raw, or M7 has nothing to reconcile against")
+}
+
+// V1 is one-way mode (K5). A hedge-mode account reports LONG and SHORT rows for one symbol,
+// and this fold has one position per instrument -- so folding both sides into it averages a
+// long and a short together and reports a position that is flat when the account is carrying
+// two live exposures.
+//
+// Refused loudly rather than skipped: an account in the wrong mode must fail to import, not
+// import halfway.
+func TestAHedgeModeFillIsRefused(t *testing.T) {
+	_, err := normalizeFuturesTrade(t, futuresTrades(t)[2])
+	require.ErrorIs(t, err, binance.ErrHedgeMode)
+}
+
+// A row that cannot be identified, timed, priced or sized is refused rather than stored with
+// a hole in it -- the same refusals the spot and transfer normalizers make.
+func TestAnUnusableFuturesFillIsRefused(t *testing.T) {
+	for _, tc := range []struct{ name, row string }{
+		{"no trade id", `{"symbol":"BTCUSDT","id":0,"side":"BUY","price":"1","qty":"1","positionSide":"BOTH","time":1757400000000}`},
+		{"no symbol", `{"symbol":"","id":1,"side":"BUY","price":"1","qty":"1","positionSide":"BOTH","time":1757400000000}`},
+		{"no time", `{"symbol":"BTCUSDT","id":1,"side":"BUY","price":"1","qty":"1","positionSide":"BOTH","time":0}`},
+		{"no side", `{"symbol":"BTCUSDT","id":1,"side":"","price":"1","qty":"1","positionSide":"BOTH","time":1757400000000}`},
+		{"zero quantity", `{"symbol":"BTCUSDT","id":1,"side":"BUY","price":"1","qty":"0","positionSide":"BOTH","time":1757400000000}`},
+		{"zero price", `{"symbol":"BTCUSDT","id":1,"side":"BUY","price":"0","qty":"1","positionSide":"BOTH","time":1757400000000}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := normalizeFuturesTrade(t, json.RawMessage(tc.row))
+			require.Error(t, err, "a futures fill with %s was normalized", tc.name)
+		})
+	}
+}
+
+// The side comes from `side`, not from `buyer`. They agree on this endpoint today, and a
+// normalizer that read the boolean would be resting on that agreement -- a derived field
+// standing in for the authoritative one, which is exactly the reading that breaks quietly
+// when a venue changes what it derives.
+func TestTheSideComesFromTheSideField(t *testing.T) {
+	event, err := normalizeFuturesTrade(t, json.RawMessage(
+		`{"symbol":"BTCUSDT","id":42,"side":"SELL","price":"1","qty":"1","buyer":true,`+
+			`"positionSide":"BOTH","time":1757400000000}`))
+	require.NoError(t, err)
+	require.Equal(t, ledger.SideSell, event.Side,
+		"the authoritative side field lost to a derived boolean")
 }
