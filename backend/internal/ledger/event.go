@@ -88,6 +88,17 @@ type Event struct {
 	// told through unknown_symbol rather than left with a quiet shortfall (L11).
 	FeeAssetID *int64
 
+	// TransferFrom and TransferTo name the two wallets a TRANSFER ran between, drawn from
+	// the closed vocabulary spot / usdm / coinm / margin / funding / external. Empty on
+	// every other event type, and the schema refuses either combination reversed.
+	//
+	// Both are present because the venue reports an intra-venue move as one row with its
+	// direction in the type, so the movement has no two halves to match (F10). Quantity is
+	// therefore unsigned: with the endpoints named, a sign would be a second and redundant
+	// statement of the same fact, free to disagree with the first.
+	TransferFrom string
+	TransferTo   string
+
 	EventTime  time.Time
 	IngestedAt time.Time
 

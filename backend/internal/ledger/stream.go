@@ -66,6 +66,8 @@ func eventFromRow(r store.LedgerEvent) Event {
 		Fee:           r.Fee,
 		FeeAsset:      text(r.FeeAsset),
 		FeeAssetID:    r.FeeAssetID,
+		TransferFrom:  text(r.TransferFrom),
+		TransferTo:    text(r.TransferTo),
 		EventTime:     r.EventTime,
 		IngestedAt:    r.IngestedAt,
 		Raw:           r.Raw,

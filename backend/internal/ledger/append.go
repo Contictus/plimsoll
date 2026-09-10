@@ -55,6 +55,8 @@ func (e Event) insertParams() store.InsertLedgerEventParams {
 		Fee:           e.Fee,
 		FeeAsset:      optionalText(e.FeeAsset),
 		FeeAssetID:    e.FeeAssetID,
+		TransferFrom:  optionalText(e.TransferFrom),
+		TransferTo:    optionalText(e.TransferTo),
 		EventTime:     e.EventTime,
 		Raw:           e.Raw,
 	}
