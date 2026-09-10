@@ -140,7 +140,7 @@ Every task's requirements implicitly include this section.
 ## Task 4: The snapshot the ledger cannot hold
 
 **Files:**
-- Create: `backend/migrations/00023_collateral_snapshots.sql`
+- Create: `backend/migrations/00022_collateral_snapshots.sql`
 - Create: `backend/internal/collateral/collateral.go` (pure)
 - Test: `backend/internal/collateral/collateral_test.go`
 
@@ -150,22 +150,22 @@ Every task's requirements implicitly include this section.
   `collateral.Distance(mark, liquidation decimal.Decimal) decimal.NullDecimal`,
   `collateral.MaintenanceAt(brackets []Bracket, notional decimal.Decimal) (decimal.Decimal, error)`.
 
-- [ ] **Step 1: Failing test — the margin buffer is margin balance minus maintenance
+- [x] **Step 1: Failing test — the margin buffer is margin balance minus maintenance
   margin**, and it is negative when it is negative. A buffer clamped at zero hides the one
   state the user most needs to see.
-- [ ] **Step 2: Failing test — liquidation distance is `|mark - liq| / mark`, and it is
+- [x] **Step 2: Failing test — liquidation distance is `|mark - liq| / mark`, and it is
   ABSENT rather than infinite when there is no liquidation price.** A flat position has no
   liquidation price, and rendering "∞" for "not applicable" teaches a reader to ignore the
   field on the day it says something.
-- [ ] **Step 3: Failing test — maintenance margin at a shocked notional crosses brackets**
+- [x] **Step 3: Failing test — maintenance margin at a shocked notional crosses brackets**
   (F15). `MaintenanceAt` walks the table: `notional * maintMarginRatio - cum`. A notional
   above every bracket is an error, not the last bracket — the table ends where the venue's
   own risk model ends.
-- [ ] **Step 4: Failing test — a snapshot's two halves must share an instant.** The
+- [x] **Step 4: Failing test — a snapshot's two halves must share an instant.** The
   constructor refuses a `Snapshot` whose account call and position call are more than a
   tolerance apart (F14): a buffer and a liquidation price from different moments describe
   two different accounts.
-- [ ] **Step 5: Implement the pure engine, then the migration. Commit.**
+- [x] **Step 5: Implement the pure engine, then the migration. Commit.**
 
 ---
 
