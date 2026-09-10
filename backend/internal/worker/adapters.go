@@ -169,3 +169,18 @@ func (r Registry) Instrument(
 func (r Registry) Asset(ctx context.Context, symbol string, at time.Time) (int64, error) {
 	return asset.Resolve(ctx, store.New(r.DB), r.Exchange, symbol, at)
 }
+
+// FuturesResyncer replays one perpetual's recent fills over REST. It is what the live USD-M
+// stream triggers: the event names the contract, this reads what happened.
+type FuturesResyncer struct {
+	Deps   backfill.Deps
+	Target backfill.Target
+}
+
+// ResyncSymbol reads one window and appends whatever it finds. Overlapping windows are free:
+// a replayed fill is deduplicated on venue identity (L5).
+func (r FuturesResyncer) ResyncSymbol(
+	ctx context.Context, symbol string, from, to time.Time,
+) error {
+	return backfill.ResyncFuturesSymbol(ctx, r.Deps, r.Target, symbol, from, to)
+}

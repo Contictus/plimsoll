@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/instrument"
@@ -302,3 +304,101 @@ func (c *Client) LeverageBracket(ctx context.Context) (json.RawMessage, error) {
 		futures: true,
 	})
 }
+
+// The two history endpoints the futures ledger is filled from, and their documented weights.
+const (
+	weightFuturesUserTrades = 5  // GET /fapi/v1/userTrades
+	weightIncome            = 30 // GET /fapi/v1/income
+)
+
+// FuturesHistory is how far back either endpoint will answer. Quoted from the pages:
+// userTrades "Only support querying trade in the past 3 months", and income history "only
+// contains data for the last three months".
+//
+// It is a permanent horizon rather than a walk that has not finished, which is the
+// difference between history_truncated and backfill_incomplete: telling a user to wait for
+// something that will not arrive is the confident-and-wrong failure L11 exists to reject.
+const FuturesHistory = 90 * 24 * time.Hour
+
+// FuturesWindow is the widest range either endpoint accepts in one request: "The time
+// between startTime and endTime cannot be longer than 7 days."
+const FuturesWindow = 7 * 24 * time.Hour
+
+// FuturesTradesQuery is one page of one symbol's futures fills.
+//
+// Time-windowed rather than id-paged, unlike spot. Spot pages by trade id because its
+// history reaches back to 2017 and a time walk would be thousands of requests per symbol --
+// which forced an inference about what fromId=0 returns (F5) that has to be checked at
+// runtime. Here the venue answers for three months at most, so thirteen windows cover the
+// whole of what exists and nothing has to be inferred at all.
+type FuturesTradesQuery struct {
+	Symbol             string
+	StartTime, EndTime time.Time
+	Limit              int
+}
+
+// FuturesUserTrades returns one page of one symbol's fills. Weight 5 (IP), signed.
+func (c *Client) FuturesUserTrades(
+	ctx context.Context, q FuturesTradesQuery,
+) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:    "/fapi/v1/userTrades",
+		query:   q.values(),
+		weight:  weightFuturesUserTrades,
+		signed:  true,
+		futures: true,
+	})
+}
+
+func (q FuturesTradesQuery) values() url.Values {
+	query := url.Values{}
+	query.Set("symbol", q.Symbol)
+	setTime(query, "startTime", q.StartTime)
+	setTime(query, "endTime", q.EndTime)
+	if q.Limit > 0 {
+		query.Set("limit", strconv.Itoa(q.Limit))
+	}
+	return query
+}
+
+// IncomeQuery is one page of the income history: funding, and the three types the fold
+// deliberately refuses (F16).
+type IncomeQuery struct {
+	StartTime, EndTime time.Time
+
+	// Page is 1-based. The endpoint offers it alongside limit, and a window with more rows
+	// than one page holds is not hypothetical: a busy account pays funding on every open
+	// position every eight hours.
+	Page  int
+	Limit int
+}
+
+// IncomeHistory returns one page of the account's cash flows. Weight 30 (IP), signed.
+//
+// Thirty is the most expensive request in this system by a factor of six, which is why the
+// walk asks for the largest page the endpoint allows rather than the most convenient one.
+func (c *Client) IncomeHistory(ctx context.Context, q IncomeQuery) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:    "/fapi/v1/income",
+		query:   q.values(),
+		weight:  weightIncome,
+		signed:  true,
+		futures: true,
+	})
+}
+
+func (q IncomeQuery) values() url.Values {
+	query := url.Values{}
+	setTime(query, "startTime", q.StartTime)
+	setTime(query, "endTime", q.EndTime)
+	if q.Page > 0 {
+		query.Set("page", strconv.Itoa(q.Page))
+	}
+	if q.Limit > 0 {
+		query.Set("limit", strconv.Itoa(q.Limit))
+	}
+	return query
+}
+
+// FuturesPageSize is the maximum `limit` both endpoints document.
+const FuturesPageSize = 1000

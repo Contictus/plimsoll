@@ -27,6 +27,10 @@ const maxResyncWindow = 24 * time.Hour
 // silently lag a fill before the lag is worth more than the transactions saved.
 const defaultProjectEvery = 2 * time.Second
 
+// defaultFuturesResyncWindow covers a burst of fills in one request without approaching the
+// venue's seven-day ceiling. Overlapping windows are free: identity deduplicates them (L5).
+const defaultFuturesResyncWindow = time.Hour
+
 // defaultCaptureEvery is how often the margin picture is refreshed when nothing says
 // otherwise. Chosen against the API's collateral TTL rather than against the market: several
 // captures may be missed before a reader is warned, so this is the interval at which "the
@@ -81,6 +85,13 @@ type Capturer interface {
 	Capture(ctx context.Context) error
 }
 
+// SymbolResyncer replays one symbol's fills over a bounded window. Separate from Resyncer,
+// which replays every traded symbol after a gap: a live event names one contract, and
+// resyncing the whole book for one fill would spend the account's weight budget on noise.
+type SymbolResyncer interface {
+	ResyncSymbol(ctx context.Context, symbol string, from, to time.Time) error
+}
+
 // SupervisorConfig is one integration's ingestion, assembled. Everything that touches time,
 // the network or the database is injected, so the supervisor's own logic is what the tests
 // exercise.
@@ -116,6 +127,23 @@ type SupervisorConfig struct {
 	// is how an operator hears about it: this package holds no logger, and the alternative
 	// to a callback is a failure nobody outside the process ever sees (L11).
 	OnProjectError func(error)
+
+	// FuturesStream is the USD-M user feed (F17). Optional: an account with no futures
+	// wallet has nothing to listen to, and a supervisor that required one could not run a
+	// spot-only account.
+	//
+	// It is a TRIGGER rather than an ingest path. The event names the contract that moved;
+	// FuturesResync reads what actually happened over REST, because the identity of a fill
+	// has to be the one the walk mints (L5) and a second spelling is a doubled position.
+	FuturesStream StreamSource
+
+	// FuturesResync replays the window a live event pointed at.
+	FuturesResync SymbolResyncer
+
+	// FuturesResyncWindow is how far back a triggered resync reads. Wide enough that a
+	// burst of fills is covered by one request, narrow enough to stay inside the venue's
+	// seven-day limit.
+	FuturesResyncWindow time.Duration
 
 	// Capture takes the margin picture on a ticker of its own. Optional and nil by default:
 	// an integration with no futures wallet has nothing to capture, and a supervisor that
@@ -180,6 +208,9 @@ func NewSupervisor(cfg SupervisorConfig) (*Supervisor, error) {
 		// A third of the TTL: two heartbeats may be lost before the lease lapses, so a
 		// single slow transaction does not hand the integration to another worker.
 		cfg.HeartbeatEvery = cfg.LeaseTTL / 3
+	}
+	if cfg.FuturesResyncWindow <= 0 {
+		cfg.FuturesResyncWindow = defaultFuturesResyncWindow
 	}
 	if cfg.CaptureEvery <= 0 {
 		cfg.CaptureEvery = defaultCaptureEvery
@@ -259,7 +290,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	// looking calm (K24). The watchdog is separate again so that a lease lost while both
 	// are busy still stops them.
 	var wg sync.WaitGroup
-	failure := make(chan error, 5)
+	failure := make(chan error, 6)
 
 	wg.Add(1)
 	go func() {
@@ -274,6 +305,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		if err := s.runProjector(runCtx); err != nil {
+			failure <- err
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.runFuturesStream(runCtx); err != nil {
 			failure <- err
 			cancel()
 		}
@@ -511,6 +551,64 @@ func (s *Supervisor) runProjector(ctx context.Context) error {
 				// A lost lease is the exception: it does not mean the fold failed, it
 				// means this worker is no longer entitled to run one, and everything else
 				// it is doing has to stop for the same reason.
+				if errors.Is(err, ErrLeaseLost) {
+					return err
+				}
+				if s.cfg.OnProjectError != nil {
+					s.cfg.OnProjectError(err)
+				}
+			}
+		}
+	}
+}
+
+// runFuturesStream turns live USD-M events into bounded REST resyncs.
+//
+// The stream is a latency improvement: without it a fill reaches the ledger at the next
+// backfill chunk, and with it within a second. What it deliberately does NOT do is normalize
+// the event itself -- the fill's identity has to match what the walk mints (L5), and this
+// build has not verified the payload's field names against the venue's own page. A stream
+// that invented an identity would double every futures position it touched.
+//
+// A failed resync does not stop the supervisor, for the same reason a failed fold does not:
+// the walk will read the same window again, and the live feed is the half that cannot be
+// recovered.
+func (s *Supervisor) runFuturesStream(ctx context.Context) error {
+	if s.cfg.FuturesStream == nil || s.cfg.FuturesResync == nil {
+		return nil
+	}
+	messages, err := s.cfg.FuturesStream.Subscribe(ctx)
+	if err != nil {
+		return fmt.Errorf("worker: subscribe futures %s: %w", s.cfg.IntegrationID, err)
+	}
+	defer func() { _ = s.cfg.FuturesStream.Close() }()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case msg, open := <-messages:
+			if !open {
+				return nil
+			}
+			if msg.Err != nil {
+				// A gap on this stream is not a gap in the ledger: the walk covers three
+				// months and the resync below covers the last hour, so the window is read
+				// either way. Nothing to replay, nothing to report.
+				continue
+			}
+			symbol, ok := binance.FuturesEventSymbol(msg.Event)
+			if !ok {
+				// Most frames are orders being placed and cancelled. Ignoring them is
+				// normal; treating them as errors would stop a healthy supervisor.
+				continue
+			}
+			to := s.cfg.Now().UTC()
+			from := to.Add(-s.cfg.FuturesResyncWindow)
+			if err := s.cfg.FuturesResync.ResyncSymbol(ctx, symbol, from, to); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				if errors.Is(err, ErrLeaseLost) {
 					return err
 				}

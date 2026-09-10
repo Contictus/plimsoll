@@ -69,10 +69,50 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if found {
+		return true, WalkTrades(ctx, r.Deps, r.Target, symbol)
+	}
+
+	// The USD-M half, last: it is the most expensive per request (income is weight 30, six
+	// times anything else) and the spot history is what most accounts have most of.
+	//
+	// Income before fills, because the income walk is what DISCOVERS which perpetuals this
+	// account has touched. Sweeping every listed contract instead would be several hundred
+	// symbols walked to find the four that matter.
+	income, err := Status(ctx, r.Deps, r.Target, ScopeIncome)
+	if err != nil {
+		return false, err
+	}
+	if income.CompletedAt == nil {
+		return true, WalkIncome(ctx, r.Deps, r.Target)
+	}
+
+	perp, found, err := r.nextUnwalkedPerp(ctx)
+	if err != nil {
+		return false, err
+	}
 	if !found {
 		return false, nil
 	}
-	return true, WalkTrades(ctx, r.Deps, r.Target, symbol)
+	return true, WalkFuturesTrades(ctx, r.Deps, r.Target, perp)
+}
+
+// nextUnwalkedPerp returns the first perpetual whose fill walk has not finished. Its scopes
+// are opened by the income walk, the way spot's are opened by discovery.
+func (r *Runner) nextUnwalkedPerp(ctx context.Context) (string, bool, error) {
+	scopes, err := Scopes(ctx, r.Deps, r.Target, scopeFuturesTradesPrefix)
+	if err != nil {
+		return "", false, err
+	}
+	for _, scope := range scopes {
+		if scope.CompletedAt != nil {
+			continue
+		}
+		if symbol, ok := FuturesSymbolOf(scope.Scope); ok {
+			return symbol, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // nextUnwalkedTransferType returns the first direction whose walk has not finished, in the

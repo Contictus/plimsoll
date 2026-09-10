@@ -47,9 +47,14 @@ type deps struct {
 	// futuresURL is the USD-M host. Separate from restURL because they are different hosts
 	// with different paths, and a test stack points both at one recorder.
 	futuresURL string
-	wsURL      string
-	ownerID    string
-	log        *slog.Logger
+
+	// futuresWsURL is the USD-M user data stream. Its own variable because it is its own
+	// host, and because F17 is the reason: the legacy one has been dead since 2026-04-23 and
+	// a stream pointed at it connects successfully and receives nothing.
+	futuresWsURL string
+	wsURL        string
+	ownerID      string
+	log          *slog.Logger
 }
 
 // supervise runs one integration for as long as the process lives, claiming it whenever it
@@ -119,6 +124,19 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 		return err
 	}
 
+	// The USD-M user feed (F17). A separate stream from spot's, because spot uses the
+	// WebSocket API with a signed subscribe (F1) and futures uses a listenKey -- two venues'
+	// worth of difference behind one interface.
+	futuresStream, err := binance.NewFuturesStream(binance.FuturesStreamConfig{
+		IntegrationID: assignment.IntegrationID,
+		Client:        client,
+		URL:           d.futuresWsURL,
+		Now:           time.Now,
+	})
+	if err != nil {
+		return err
+	}
+
 	registry := worker.Registry{DB: d.pool, Exchange: exchangeName}
 	target := backfill.Target{
 		AccountID:     assignment.AccountID,
@@ -174,6 +192,9 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 		// The margin picture, refreshed beside the feed. It is not ingestion: nothing about
 		// it reaches the ledger, because nothing in the ledger can say what the venue's
 		// margin engine believed at 12:00 (L3). It is captured, and /risk says how old it is.
+		FuturesStream: futuresStream,
+		FuturesResync: worker.FuturesResyncer{Deps: resyncDeps, Target: target},
+
 		Capture: worker.CollateralCapturer(worker.CaptureConfig{
 			DB:            d.pool,
 			AccountID:     assignment.AccountID,
