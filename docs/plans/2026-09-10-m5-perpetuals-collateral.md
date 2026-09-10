@@ -119,21 +119,21 @@ Every task's requirements implicitly include this section.
 - Produces: `binance.NormalizeIncome(ctx, r, ic, raw) (ledger.Event, error)`,
   `binance.ErrUnknownIncomeType`, `binance.ErrIncomeReportedElsewhere`.
 
-- [ ] **Step 1: Failing test — `FUNDING_FEE` becomes a `FUNDING_PAYMENT`** whose signed
+- [x] **Step 1: Failing test — `FUNDING_FEE` becomes a `FUNDING_PAYMENT`** whose signed
   amount is the venue's `income`, in the settle asset, identity
   `usdm:income:FUNDING_FEE:<tranId>` (F3, F16).
-- [ ] **Step 2: Failing test — `TRANSFER` is skipped, and says why** (F12). The wallet
+- [x] **Step 2: Failing test — `TRANSFER` is skipped, and says why** (F12). The wallet
   endpoint already reported that movement in M3.5; folding it here moves the money twice.
   Skipped with a named error rather than silently, because "we chose not to" and "we forgot"
   must not look the same in a log.
-- [ ] **Step 3: Failing test — `REALIZED_PNL` is skipped** for the same reason as Task 2
+- [x] **Step 3: Failing test — `REALIZED_PNL` is skipped** for the same reason as Task 2
   Step 2, and `COMMISSION` is skipped because the fill already carries it (L9). Every skip
   is a named sentinel, and an unrecognized type is `ErrUnknownIncomeType` — the enum is not
   fully published (F16), so the whitelist is the design and not a shortcut.
-- [ ] **Step 4: Failing test — funding moves the balance and never the average entry
+- [x] **Step 4: Failing test — funding moves the balance and never the average entry
   price.** It is a cash flow in the settle asset (K18): a position that paid funding did not
   become more expensive to have opened.
-- [ ] **Step 5: Implement. Commit.**
+- [x] **Step 5: Implement. Commit.**
 
 ---
 

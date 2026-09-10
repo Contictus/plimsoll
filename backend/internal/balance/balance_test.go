@@ -268,3 +268,55 @@ func TestAFillWithoutLegsIsRefused(t *testing.T) {
 	_, err := balance.Deltas(fill(ledger.SideBuy, "1", "100"), balance.Resolved{})
 	require.ErrorIs(t, err, balance.ErrUnresolved)
 }
+
+// Funding is a cash flow in the settle asset, and V1 is USD-M only, so the settle asset is
+// the quote asset and this is exact rather than an approximation.
+//
+// Signed both ways, because it goes both ways: a short position in a positive-funding market
+// is PAID. A fold that took the absolute value would turn every funding receipt into a cost
+// and quietly understate the account by twice the funding it earned.
+func TestFundingMovesTheSettleAssetInWhicheverDirectionItWent(t *testing.T) {
+	for _, tc := range []struct{ income, want string }{
+		{"-0.375", "-0.375"},
+		{"1.25", "1.25"},
+		{"0", "0"},
+	} {
+		e := ledger.Event{
+			VenueEventID: "usdm:income:FUNDING_FEE:1",
+			EventType:    ledger.TypeFundingPayment,
+			Quantity:     dec(tc.income),
+		}
+		got, err := balance.Deltas(e, legs())
+		require.NoError(t, err)
+		require.Equal(t, [][2]string{{"2", tc.want}}, moved(t, got),
+			"funding of %s moved the wrong asset or the wrong way", tc.income)
+	}
+}
+
+// Funding without an instrument cannot be folded: the settle asset is a property of the
+// contract, and a payment with no contract has no asset to move. Guessing one is how a
+// funding cost lands on a coin the account never held.
+func TestFundingWithoutLegsIsRefused(t *testing.T) {
+	_, err := balance.Deltas(ledger.Event{
+		VenueEventID: "usdm:income:FUNDING_FEE:1",
+		EventType:    ledger.TypeFundingPayment,
+		Quantity:     dec("-1"),
+	}, balance.Resolved{})
+	require.ErrorIs(t, err, balance.ErrUnresolved)
+}
+
+// Funding never touches the average entry price -- that is internal/position's rule (K18)
+// and it is tested there. What this engine must get right is the other half: the money did
+// leave the account, so the balance moves even though the cost basis does not.
+func TestFundingChangesTheBalanceWhileTheEntryPriceIsSomeoneElsesProblem(t *testing.T) {
+	buy := fill(ledger.SideBuy, "1", "100")
+	funding := ledger.Event{
+		VenueEventID: "usdm:income:FUNDING_FEE:2",
+		EventType:    ledger.TypeFundingPayment,
+		Quantity:     dec("-3"),
+	}
+
+	held := fold(t, []ledger.Event{buy, funding}, []balance.Resolved{legs(), legs()})
+	require.Equal(t, map[int64]string{btc: "1", usdt: "-103"}, held,
+		"the 100 the fill spent plus the 3 the funding cost")
+}
