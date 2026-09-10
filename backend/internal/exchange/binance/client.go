@@ -91,6 +91,12 @@ type Config struct {
 	// Credential is the read-only key pair. Verify has already refused anything else (K9).
 	Credential integration.Credential
 	Limiter    Limiter
+	// FuturesBaseURL is the USD-M host, e.g. https://fapi.binance.com. Empty falls back to
+	// BaseURL, which is what a test with one fake server wants; production sets both,
+	// because spot and futures are separate services and a futures path on the spot host
+	// is a 404 rather than a redirect.
+	FuturesBaseURL string
+
 	// BaseURL has no trailing slash, e.g. https://api.binance.com. Injected so tests run
 	// against httptest and never against the live API.
 	BaseURL string
@@ -109,15 +115,16 @@ type Config struct {
 // Client is one integration's REST connection. It is safe for concurrent use: everything
 // it holds is read-only after New, and the mutable state lives in the limiter.
 type Client struct {
-	integrationID uuid.UUID
-	cred          integration.Credential
-	limiter       Limiter
-	baseURL       string
-	http          *http.Client
-	now           func() time.Time
-	backoff       func(int) time.Duration
-	recvWindow    time.Duration
-	priority      ratelimit.Priority
+	integrationID  uuid.UUID
+	cred           integration.Credential
+	limiter        Limiter
+	baseURL        string
+	futuresBaseURL string
+	http           *http.Client
+	now            func() time.Time
+	backoff        func(int) time.Duration
+	recvWindow     time.Duration
+	priority       ratelimit.Priority
 }
 
 // New builds a Client. The returned client is realtime priority: a backfill has to ask for
@@ -134,15 +141,16 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	c := &Client{
-		integrationID: cfg.IntegrationID,
-		cred:          cfg.Credential,
-		limiter:       cfg.Limiter,
-		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
-		http:          cfg.HTTPClient,
-		now:           cfg.Now,
-		backoff:       cfg.Backoff,
-		recvWindow:    cfg.RecvWindow,
-		priority:      ratelimit.PriorityRealtime,
+		integrationID:  cfg.IntegrationID,
+		cred:           cfg.Credential,
+		limiter:        cfg.Limiter,
+		baseURL:        strings.TrimRight(cfg.BaseURL, "/"),
+		futuresBaseURL: strings.TrimRight(cfg.FuturesBaseURL, "/"),
+		http:           cfg.HTTPClient,
+		now:            cfg.Now,
+		backoff:        cfg.Backoff,
+		recvWindow:     cfg.RecvWindow,
+		priority:       ratelimit.PriorityRealtime,
 	}
 	if c.http == nil {
 		c.http = &http.Client{Timeout: 30 * time.Second}
@@ -193,6 +201,12 @@ type request struct {
 	query  url.Values
 	weight int
 	signed bool
+
+	// futures sends this request to the USD-M host instead of the spot one. The two are
+	// separate services with separate IP weight budgets; this client charges both against
+	// one limiter, which over-counts rather than under-counts and is therefore the safe
+	// direction -- a shared budget spends some throughput, an unshared one earns a ban.
+	futures bool
 }
 
 // APIError is Binance's own error body. Code is its numeric error code, which is the field
@@ -384,14 +398,24 @@ func (c *Client) url(req request) (string, error) {
 	}
 
 	if !req.signed {
-		return c.baseURL + req.path + suffix(query.Encode()), nil
+		return c.hostFor(req) + req.path + suffix(query.Encode()), nil
 	}
 
 	query.Set("recvWindow", strconv.FormatInt(c.recvWindow.Milliseconds(), 10))
 	query.Set("timestamp", strconv.FormatInt(c.now().UnixMilli(), 10))
 
 	encoded := query.Encode()
-	return c.baseURL + req.path + "?" + encoded + "&signature=" + Sign(c.cred.APISecret.Reveal(), encoded), nil
+	return c.hostFor(req) + req.path + "?" + encoded + "&signature=" + Sign(c.cred.APISecret.Reveal(), encoded), nil
+}
+
+// hostFor picks the service this request belongs to. A futures request against the spot host
+// is a 404, which surfaces as "no such endpoint" rather than as "wrong host" -- so the choice
+// is made here, once, rather than at each call site.
+func (c *Client) hostFor(req request) string {
+	if req.futures && c.futuresBaseURL != "" {
+		return c.futuresBaseURL
+	}
+	return c.baseURL
 }
 
 func suffix(encoded string) string {

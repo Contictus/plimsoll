@@ -573,3 +573,25 @@ func TestMyTradesRefusesAWindowWiderThanTheVenueAllows(t *testing.T) {
 	require.ErrorIs(t, err, binance.ErrUnsupportedQuery)
 	require.Contains(t, err.Error(), "24h")
 }
+
+// newClientWithFutures wires a client that knows both hosts, so a test can prove a request
+// went to the right one rather than merely that it succeeded.
+func newClientWithFutures(
+	t *testing.T, spot, futures *httptest.Server,
+) (*binance.Client, *fakeLimiter, *httptest.Server) {
+	t.Helper()
+	lim := &fakeLimiter{}
+	client, err := binance.New(binance.Config{
+		IntegrationID: uuid.New(),
+		Credential: integration.Credential{
+			APIKey:    auth.Secret(testAPIKey),
+			APISecret: auth.Secret(testAPISecret),
+		},
+		Limiter:        lim,
+		BaseURL:        spot.URL,
+		FuturesBaseURL: futures.URL,
+		Backoff:        func(int) time.Duration { return 0 },
+	})
+	require.NoError(t, err)
+	return client, lim, futures
+}
