@@ -5,13 +5,13 @@
 INSERT INTO ledger_events (
   account_id, integration_id, venue_event_id, venue_sequence, source, event_type,
   instrument_id, asset_id, strategy_id, side, quantity, price, fee, fee_asset, fee_asset_id,
-  event_time, raw
+  transfer_from, transfer_to, event_time, raw
 ) VALUES (
   sqlc.arg(account_id), sqlc.arg(integration_id), sqlc.arg(venue_event_id),
   sqlc.arg(venue_sequence), sqlc.arg(source), sqlc.arg(event_type),
   sqlc.narg(instrument_id), sqlc.narg(asset_id), sqlc.narg(strategy_id), sqlc.narg(side),
   sqlc.narg(quantity), sqlc.narg(price), sqlc.narg(fee), sqlc.narg(fee_asset), sqlc.narg(fee_asset_id),
-  sqlc.arg(event_time), sqlc.arg(raw)
+  sqlc.narg(transfer_from), sqlc.narg(transfer_to), sqlc.arg(event_time), sqlc.arg(raw)
 )
 ON CONFLICT (integration_id, venue_event_id) DO NOTHING;
 
@@ -22,7 +22,7 @@ ON CONFLICT (integration_id, venue_event_id) DO NOTHING;
 -- (K20, L6).
 SELECT seq, account_id, integration_id, venue_event_id, venue_sequence, source,
        event_type, instrument_id, strategy_id, side, quantity, price, fee, fee_asset,
-       event_time, ingested_at, raw, asset_id, fee_asset_id
+       event_time, ingested_at, raw, asset_id, fee_asset_id, transfer_from, transfer_to
 FROM ledger_events
 WHERE account_id = sqlc.arg(account_id)
   AND integration_id = sqlc.arg(integration_id)

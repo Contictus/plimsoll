@@ -145,6 +145,8 @@ type LedgerEvent struct {
 	Raw           []byte
 	AssetID       *int64
 	FeeAssetID    *int64
+	TransferFrom  *string
+	TransferTo    *string
 }
 
 type Position struct {

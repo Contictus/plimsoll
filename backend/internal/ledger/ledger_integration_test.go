@@ -480,3 +480,129 @@ func TestTheAppRoleCannotCreateAnAsset(t *testing.T) {
 		`INSERT INTO assets (canonical_symbol, kind) VALUES ('INVENTED', 'native')`)
 	require.Error(t, err, "the ingest path must not be able to invent an asset")
 }
+
+// transfer is the minimal storable TRANSFER: one asset moving between two wallets of one
+// integration. Quantity is unsigned -- with both endpoints named on the event the sign
+// would be a second, redundant statement of the direction (F10).
+func transfer(t *testing.T, accountID, integrationID uuid.UUID, venueEventID string) ledger.Event {
+	t.Helper()
+	e := deposit(t, accountID, integrationID, venueEventID, 0, at(0))
+	e.EventType = ledger.TypeTransfer
+	e.TransferFrom = "spot"
+	e.TransferTo = "usdm"
+	e.Raw = json.RawMessage(`{"probe":"transfer"}`)
+	return e
+}
+
+// A TRANSFER that names no endpoints is a transfer we cannot fold. The balance engine
+// decides whether an asset moved by comparing the two wallets; with neither one present
+// there is nothing to compare, and the fold would have to guess.
+func TestATransferMustNameBothEndpoints(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	for _, tc := range []struct {
+		name     string
+		from, to string
+	}{
+		{"neither", "", ""},
+		{"only the origin", "spot", ""},
+		{"only the destination", "", "usdm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := transfer(t, accountID, integrationID, "spot:transfer:"+uuid.NewString())
+			e.TransferFrom, e.TransferTo = tc.from, tc.to
+
+			_, err := appendAs(t, accountID, e)
+			require.Error(t, err, "a TRANSFER naming %q -> %q was stored", tc.from, tc.to)
+		})
+	}
+}
+
+// The other direction, and the one a constraint written only against the missing case
+// would let through: a fill that acquires a wallet nobody reads. A trade moves an
+// instrument between two assets, not a balance between two wallets, so an endpoint on one
+// is a normalizer bug and must not reach the table.
+func TestAnEventThatIsNotATransferMustNameNoEndpoints(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+	instrumentID := seedInstrument(t)
+
+	for _, tc := range []struct{ name, from, to string }{
+		{"origin on a trade", "spot", ""},
+		{"destination on a trade", "", "usdm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := deposit(t, accountID, integrationID, "spot:trade:"+uuid.NewString(), 1, at(0))
+			e.EventType = ledger.TypeTrade
+			e.InstrumentID = &instrumentID
+			e.AssetID = nil
+			e.Side = ledger.SideBuy
+			e.Price = decimal.NewNullDecimal(decimal.RequireFromString("2"))
+			e.TransferFrom, e.TransferTo = tc.from, tc.to
+
+			_, err := appendAs(t, accountID, e)
+			require.Error(t, err, "a TRADE naming %q -> %q was stored", tc.from, tc.to)
+		})
+	}
+}
+
+// The wallet vocabulary is closed for the same reason the event type is: a wallet stored
+// under a name no fold recognizes is an event that silently does nothing. `external` is in
+// it from the first day even though nothing writes one yet -- it is the far side of a
+// cross-venue transfer (M8), and a vocabulary that has to grow to admit the known case was
+// the wrong vocabulary.
+func TestTheWalletVocabularyIsClosed(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	e := transfer(t, accountID, integrationID, "spot:transfer:"+uuid.NewString())
+	e.TransferTo = "SPOT" // the venue's own casing, not ours
+	_, err := appendAs(t, accountID, e)
+	require.Error(t, err, "an unrecognized wallet name was stored")
+
+	// Each wallet is exercised on both sides, against a counterpart that is not itself --
+	// a wallet transferring to itself is refused by a different constraint.
+	for _, wallet := range []string{"spot", "usdm", "coinm", "margin", "funding", "external"} {
+		other := "spot"
+		if wallet == other {
+			other = "usdm"
+		}
+		for _, endpoints := range [][2]string{{wallet, other}, {other, wallet}} {
+			ok := transfer(t, accountID, integrationID, "spot:transfer:"+uuid.NewString())
+			ok.TransferFrom, ok.TransferTo = endpoints[0], endpoints[1]
+			inserted, err := appendAs(t, accountID, ok)
+			require.NoError(t, err, "wallet %q must be in the vocabulary", wallet)
+			require.Equal(t, 1, inserted)
+		}
+	}
+}
+
+// The endpoints have to survive the round trip, not merely pass the constraint on the way
+// in: the balance fold reads them off the streamed event, never off raw (L3).
+func TestTransferEndpointsSurviveTheRoundTrip(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	e := transfer(t, accountID, integrationID, "spot:transfer:"+uuid.NewString())
+	e.TransferFrom, e.TransferTo = "funding", "coinm"
+
+	inserted, err := appendAs(t, accountID, e)
+	require.NoError(t, err)
+	require.Equal(t, 1, inserted)
+
+	got := streamAs(t, accountID, integrationID)
+	require.Len(t, got, 1)
+	require.Equal(t, "funding", got[0].TransferFrom)
+	require.Equal(t, "coinm", got[0].TransferTo)
+}
+
+// A wallet cannot transfer to itself. The venue has no such type, so a row saying
+// otherwise is a normalizer that failed to parse a direction and defaulted -- and that row
+// would fold to no delta, which is indistinguishable, from the balance alone, from the
+// internal transfer that is supposed to fold to no delta.
+func TestAWalletCannotTransferToItself(t *testing.T) {
+	accountID, integrationID := seedIntegration(t)
+
+	e := transfer(t, accountID, integrationID, "spot:transfer:"+uuid.NewString())
+	e.TransferFrom, e.TransferTo = "spot", "spot"
+
+	_, err := appendAs(t, accountID, e)
+	require.Error(t, err, "a transfer from spot to spot was stored")
+}
