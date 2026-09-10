@@ -23,6 +23,7 @@ const (
 	weightDeposits     = 1  // GET /sapi/v1/capital/deposit/hisrec
 	weightWithdrawals  = 1  // GET /sapi/v1/capital/withdraw/history
 	weightRestrictions = 1  // GET /sapi/v1/account/apiRestrictions
+	weightTransfers    = 1  // GET /sapi/v1/asset/transfer (IP)
 )
 
 // MaxTradeWindow is the widest startTime..endTime span myTrades will answer, quoted from
@@ -148,6 +149,51 @@ func (c *Client) DepositHistory(ctx context.Context, q HistoryQuery) (json.RawMe
 		weight: weightDeposits,
 		signed: true,
 	})
+}
+
+// TransferQuery is the universal-transfer endpoint's shape, which is not HistoryQuery's.
+//
+// Type is REQUIRED and is a direction rather than a category (F10), so "every transfer" is
+// one call per direction. Paging is `current` (1-based) and `size` (max 100) rather than an
+// offset and a limit -- a different spelling of the same weak, shifting-page mechanism, and
+// the reason the walk pins a time window around it.
+type TransferQuery struct {
+	Type               string
+	StartTime, EndTime time.Time
+	Page, Size         int
+}
+
+// TransferPageSize is the maximum `size` the endpoint documents. Exported because the walk
+// pages against it and a walk that guessed a larger number would silently read short pages.
+const TransferPageSize = 100
+
+// UniversalTransferHistory returns one page of one direction's transfers. Weight 1 (IP).
+//
+// The response is an object -- {"total": n, "rows": [...]} -- not the bare array the
+// deposit endpoints return, which is why it has its own decoder rather than sharing one.
+func (c *Client) UniversalTransferHistory(
+	ctx context.Context, q TransferQuery,
+) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:   "/sapi/v1/asset/transfer",
+		query:  q.values(),
+		weight: weightTransfers,
+		signed: true,
+	})
+}
+
+func (q TransferQuery) values() url.Values {
+	query := url.Values{}
+	query.Set("type", q.Type)
+	setTime(query, "startTime", q.StartTime)
+	setTime(query, "endTime", q.EndTime)
+	if q.Page > 0 {
+		query.Set("current", strconv.Itoa(q.Page))
+	}
+	if q.Size > 0 {
+		query.Set("size", strconv.Itoa(q.Size))
+	}
+	return query
 }
 
 // WithdrawHistory returns withdrawals.

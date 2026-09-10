@@ -53,6 +53,27 @@ func (f fakeDeposit) raw() json.RawMessage {
 		f.ID, f.Amount, f.Coin, f.Status, f.Time.UnixMilli()))
 }
 
+// fakeTransfer is one universal-transfer row: one movement, both endpoints named by its
+// type (F10).
+type fakeTransfer struct {
+	TranID int64
+	Type   string
+	Time   time.Time
+	Asset  string
+	Amount string
+	Status string
+}
+
+func (f fakeTransfer) raw() json.RawMessage {
+	status := f.Status
+	if status == "" {
+		status = "CONFIRMED"
+	}
+	return json.RawMessage(fmt.Sprintf(
+		`{"asset":%q,"amount":%q,"type":%q,"status":%q,"tranId":%d,"timestamp":%d}`,
+		f.Asset, f.Amount, f.Type, status, f.TranID, f.Time.UnixMilli()))
+}
+
 // fakeClient is a Binance account that exists only in memory. It answers the two endpoints
 // the backfill uses, records every query it was asked, and can be told to misbehave in the
 // two ways that matter: failing partway through a walk, and answering fromId=0 with the
@@ -82,8 +103,74 @@ type fakeClient struct {
 	// interrupted partway through its sweep.
 	failOnSymbol string
 
-	tradeCalls   []binance.MyTradesQuery
-	depositCalls []binance.HistoryQuery
+	transfers []fakeTransfer
+
+	// failOnTransferType makes every request for one direction fail, which is how a
+	// transfer walk is interrupted partway through its eight scopes.
+	failOnTransferType string
+
+	tradeCalls    []binance.MyTradesQuery
+	depositCalls  []binance.HistoryQuery
+	transferCalls []binance.TransferQuery
+}
+
+// UniversalTransferHistory answers one direction, one window, one page. It returns the
+// object shape the endpoint documents -- {"total": n, "rows": [...]} -- because a fake that
+// returned a bare array would let a decoder pass here and fail against the real venue.
+//
+// `total` is the count of the whole window, not of the page, which is what makes the
+// endpoint's paging offset-based rather than keyset.
+func (c *fakeClient) UniversalTransferHistory(
+	_ context.Context, q binance.TransferQuery,
+) (json.RawMessage, error) {
+	c.transferCalls = append(c.transferCalls, q)
+	if q.Type == c.failOnTransferType && c.failOnTransferType != "" {
+		return nil, errInjected
+	}
+	if q.Type == "" {
+		// The venue's own refusal, mirrored: `type` is a required parameter.
+		return nil, fmt.Errorf("fake binance: transfer query with no type")
+	}
+
+	var window []fakeTransfer
+	for _, tr := range c.transfers {
+		if tr.Type != q.Type {
+			continue
+		}
+		if !tr.Time.Before(q.StartTime) && tr.Time.Before(q.EndTime) {
+			window = append(window, tr)
+		}
+	}
+	sort.Slice(window, func(i, j int) bool { return window[i].TranID < window[j].TranID })
+	total := len(window)
+
+	size := q.Size
+	if size <= 0 {
+		size = 10 // the endpoint's documented default
+	}
+	page := q.Page
+	if page <= 0 {
+		page = 1
+	}
+	from := (page - 1) * size
+	switch {
+	case from >= len(window):
+		window = nil
+	case from+size > len(window):
+		window = window[from:]
+	default:
+		window = window[from : from+size]
+	}
+
+	rows := make([]json.RawMessage, 0, len(window))
+	for _, tr := range window {
+		rows = append(rows, tr.raw())
+	}
+	body, err := json.Marshal(rows)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(fmt.Sprintf(`{"total":%d,"rows":%s}`, total, body)), nil
 }
 
 func (c *fakeClient) MyTrades(

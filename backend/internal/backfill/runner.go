@@ -3,6 +3,8 @@ package backfill
 import (
 	"context"
 	"time"
+
+	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 )
 
 // Runner drives one integration's historical import, one chunk per call.
@@ -25,10 +27,11 @@ type Runner struct {
 
 // Step does one chunk and reports whether more history remains.
 //
-// The order is deposits, then discovery, then one symbol per call. Deposits first because
-// they are weight 1 and give an account its balances quickly; discovery next because a
-// trades scope does not exist until discovery opens it, so a runner that walked first would
-// find nothing to walk and report a complete history over an account it never looked at.
+// The order is deposits, then one transfer direction per call, then discovery, then one
+// symbol per call. Deposits and transfers first because they are weight 1 and give an
+// account its balances quickly; discovery next because a trades scope does not exist until
+// discovery opens it, so a runner that walked first would find nothing to walk and report a
+// complete history over an account it never looked at.
 //
 // Once every scope is complete, Step returns false and does no further work. Deposits made
 // *after* that point are not picked up here: `balanceUpdate` is not normalized yet, so an
@@ -42,6 +45,15 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 	}
 	if deposits.CompletedAt == nil {
 		return true, WalkDeposits(ctx, r.Deps, r.Target, r.Since)
+	}
+
+	// Transfers next, and one direction per chunk. They are weight 1 like deposits, and
+	// they are what stops a spot -> futures move being read as a sale once the fills around
+	// it arrive (M3.5).
+	if transferType, found, err := r.nextUnwalkedTransferType(ctx); err != nil {
+		return false, err
+	} else if found {
+		return true, WalkTransferDirection(ctx, r.Deps, r.Target, transferType, r.Since)
 	}
 
 	discover, err := Status(ctx, r.Deps, r.Target, ScopeDiscover)
@@ -61,6 +73,24 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return true, WalkTrades(ctx, r.Deps, r.Target, symbol)
+}
+
+// nextUnwalkedTransferType returns the first direction whose walk has not finished, in the
+// normalizer's own order. The directions come from binance.WalkedTransferTypes rather than
+// from the stored scopes, unlike the symbol walk: a symbol scope is opened by discovery, so
+// it exists before it is walked, while a transfer direction is known in advance and its
+// scope only exists once something has walked it.
+func (r *Runner) nextUnwalkedTransferType(ctx context.Context) (string, bool, error) {
+	for _, transferType := range binance.WalkedTransferTypes() {
+		progress, err := Status(ctx, r.Deps, r.Target, ScopeTransfers(transferType))
+		if err != nil {
+			return "", false, err
+		}
+		if progress.CompletedAt == nil {
+			return transferType, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // nextUnwalkedSymbol returns the first symbol whose walk has not finished. First in the

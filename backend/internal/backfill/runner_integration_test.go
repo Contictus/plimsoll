@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/backfill"
+	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,10 +85,49 @@ func TestTheRunnerDiscoversBeforeItWalks(t *testing.T) {
 
 // mixedRegistry resolves both a trading pair and a coin, which is what a runner needs: one
 // walk moves pairs and the other moves single assets.
-func mixedRegistry(t *testing.T, symbol, coin string) fakeRegistry {
+func mixedRegistry(t *testing.T, symbol string, coins ...string) fakeRegistry {
 	t.Helper()
-	return fakeRegistry{
+	r := fakeRegistry{
 		instruments: map[string]int64{symbol: seedInstrument(t)},
-		assets:      map[string]int64{coin: seedAsset(t)},
+		assets:      map[string]int64{},
 	}
+	for _, coin := range coins {
+		r.assets[coin] = seedAsset(t)
+	}
+	return r
+}
+
+// A walk nothing calls is a walk that does not exist. M3 shipped a projector that was
+// tested, rebuild-equal, and never invoked by any process (K38), and the tests could not
+// notice because every one of them called it directly. So the transfer walk gets the test
+// that names the runner and never names WalkTransfers.
+func TestTheRunnerWalksTransfers(t *testing.T) {
+	ctx := context.Background()
+	target := seedIntegration(t)
+	client := tradedAccount("BTCUSDT", 1)
+	client.transfers = []fakeTransfer{
+		{TranID: 9001, Type: "MAIN_UMFUTURE", Time: now.Add(-2 * time.Hour), Asset: "USDT", Amount: "25"},
+	}
+	d := newDeps(t, client, mixedRegistry(t, "BTCUSDT", "BNB", "USDT"))
+
+	runner := &backfill.Runner{
+		Deps: d, Target: target,
+		Symbols: []string{"BTCUSDT"},
+		Since:   now.Add(-30 * 24 * time.Hour),
+	}
+
+	for steps := 0; ; steps++ {
+		more, err := runner.Step(ctx)
+		require.NoError(t, err)
+		if !more {
+			break
+		}
+		require.Less(t, steps, 30, "the runner is not making progress")
+	}
+
+	require.Contains(t, venueIDs(events(t, target)),
+		binance.TransferID("MAIN_UMFUTURE", 9001),
+		"the runner finished an import that never fetched a transfer")
+	require.NotNil(t,
+		progressOf(t, d, target, backfill.ScopeTransfers("MAIN_UMFUTURE")).CompletedAt)
 }

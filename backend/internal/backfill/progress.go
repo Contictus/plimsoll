@@ -36,6 +36,11 @@ const (
 	ScopeDeposits = "deposits"
 
 	scopeTradesPrefix = "trades:"
+
+	// One scope per transfer direction, because the endpoint takes the direction as a
+	// required parameter (F10) and an import interrupted in the sixth of eight must resume
+	// there rather than re-read the five that finished.
+	scopeTransfersPrefix = "transfers:"
 )
 
 // ScopeTrades names the walk of one symbol's fills. Exported for the same reason
@@ -59,6 +64,7 @@ var ErrIncomplete = errors.New("backfill: " + ReasonIncomplete)
 type Client interface {
 	MyTrades(ctx context.Context, q binance.MyTradesQuery) (json.RawMessage, error)
 	DepositHistory(ctx context.Context, q binance.HistoryQuery) (json.RawMessage, error)
+	UniversalTransferHistory(ctx context.Context, q binance.TransferQuery) (json.RawMessage, error)
 }
 
 // Registry resolves exchange symbols and coin tickers to canonical ids, always as of the
@@ -82,6 +88,11 @@ type Deps struct {
 	// spans several pages.
 	TradePageLimit   int
 	DepositPageLimit int
+
+	// TransferPageSize is the universal-transfer endpoint's own cap, which is 100 rather
+	// than 1000 -- a different endpoint with a different limit, so it does not share the
+	// other two's ceiling.
+	TransferPageSize int
 }
 
 // maxPageLimit is the cap both endpoints document (docs/BINANCE-API-NOTES.md section 2).
@@ -89,6 +100,13 @@ const maxPageLimit = 1000
 
 func (d Deps) tradeLimit() int   { return pageLimit(d.TradePageLimit) }
 func (d Deps) depositLimit() int { return pageLimit(d.DepositPageLimit) }
+
+func (d Deps) transferPageSize() int {
+	if d.TransferPageSize <= 0 || d.TransferPageSize > binance.TransferPageSize {
+		return binance.TransferPageSize
+	}
+	return d.TransferPageSize
+}
 
 func pageLimit(configured int) int {
 	if configured <= 0 || configured > maxPageLimit {
