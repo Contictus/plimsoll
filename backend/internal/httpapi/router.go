@@ -107,6 +107,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerPnL(api)
 	d.registerRisk(api)
 	d.registerStrategy(api)
+	d.registerExposure(api)
 
 	return router
 }

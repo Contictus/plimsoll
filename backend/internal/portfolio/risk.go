@@ -9,6 +9,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
+	"github.com/Contictus/plimsoll/backend/internal/risk"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/google/uuid"
@@ -334,4 +335,113 @@ func LoadFunding(
 		return Funding{}, err
 	}
 	return out, nil
+}
+
+// Exposure is the risk report plus what it was computed from: one valuation run, named in
+// as_of, and the freshness of everything that fed it.
+type Exposure struct {
+	AsOf      time.Time
+	Freshness freshness.Report
+
+	// Equity is invalid when no run has completed. Invalid rather than zero, for the same
+	// reason a portfolio without a run carries no total: an account nobody could price is not
+	// an account worth nothing (L11).
+	Equity decimal.NullDecimal
+	Report risk.Report
+}
+
+// LoadExposure marks the account once and measures it, portfolio-wide and per strategy.
+//
+// One transaction and one run (K11, L10). The alternative -- reading the portfolio through
+// one call and the exposure through another -- is two valuations of one account, and "every
+// screen shows a different total" is precisely what that produces.
+//
+// Equity is the portfolio's valued total plus the open perpetual PnL the balances do not
+// carry yet: a perp's profit is not in any wallet until it is realized, and leaving it out
+// would overstate leverage for exactly the account that is winning.
+func LoadExposure(
+	ctx context.Context,
+	db tenancy.Beginner,
+	accountID uuid.UUID,
+	w Window,
+	collateralTTL time.Duration,
+) (Exposure, error) {
+	var (
+		in        Input
+		snapshots []CollateralSnapshot
+		statuses  []ingest.Status
+	)
+	err := tenancy.InTx(ctx, db, accountID, func(q *store.Queries) error {
+		var err error
+		if in, err = read(ctx, q, accountID, w); err != nil {
+			return err
+		}
+		statuses, err = ingest.StatusIn(ctx, q, accountID)
+		if err != nil {
+			return err
+		}
+		rows, err := q.ListAccountCollateral(ctx, accountID)
+		if err != nil {
+			return fmt.Errorf("portfolio: read collateral for %s: %w", accountID, err)
+		}
+		snapshots = make([]CollateralSnapshot, 0, len(rows))
+		for _, s := range rows {
+			snapshots = append(snapshots, CollateralSnapshot{
+				IntegrationID: s.IntegrationID, AsOf: s.AsOf, UnrealizedPnL: s.UnrealizedPnl,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return Exposure{}, err
+	}
+
+	p := Build(in)
+	out := Exposure{AsOf: p.AsOf, Freshness: p.Freshness}
+	reasons := append([]freshness.Reason{}, p.Freshness.Reasons...)
+
+	positions := make([]risk.Position, 0, len(p.Holdings))
+	for _, h := range p.Holdings {
+		if h.Flat {
+			// A closed position is kept for its realized PnL, and it is not exposure. Its
+			// market value is zero, so including it would change no total -- but it would
+			// put a row of zeroes in every strategy's net delta, and a screen listing
+			// exposures that are not exposures is one nobody reads carefully.
+			continue
+		}
+		positions = append(positions, risk.Position{
+			Symbol:      h.Symbol,
+			BaseAsset:   h.BaseAsset,
+			Strategy:    h.Strategy,
+			MarketValue: h.MarketValue,
+		})
+	}
+
+	if p.TotalValueUSD.Valid {
+		equity := p.TotalValueUSD.Decimal
+		for _, s := range snapshots {
+			equity = equity.Add(s.UnrealizedPnL)
+			if collateralTTL > 0 && w.Now.Sub(s.AsOf) > collateralTTL {
+				reasons = append(reasons, collateralStale(nameOf(statuses, s.IntegrationID), s.AsOf))
+			}
+		}
+		out.Equity = decimal.NewNullDecimal(equity)
+	}
+
+	// Computed with whatever equity there is: with none, the ratios come back invalid and the
+	// exposures are still exact. Refusing to answer at all would withhold the half we know.
+	out.Report = risk.Compute(risk.Input{Equity: out.Equity.Decimal, Positions: positions})
+	out.Freshness = freshness.New(reasons...)
+	return out, nil
+}
+
+// nameOf labels an integration the way every other reason does, so one response does not call
+// the same connection two different things.
+func nameOf(statuses []ingest.Status, id uuid.UUID) string {
+	for _, s := range statuses {
+		if s.IntegrationID == id {
+			return fmt.Sprintf("%s %s", s.Exchange, s.Label)
+		}
+	}
+	return id.String()
 }
