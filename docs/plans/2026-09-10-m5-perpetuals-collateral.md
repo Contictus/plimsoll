@@ -61,21 +61,25 @@ Every task's requirements implicitly include this section.
 ## Task 1: The futures market exists in the registry
 
 **Files:**
-- Create: `backend/migrations/00022_futures_instruments.sql`
+- ~~Create: `backend/migrations/00022_futures_instruments.sql`~~ — unnecessary, see Step 3
 - Modify: `backend/internal/exchange/binance/spot.go` (exchangeInfo for fapi)
 - Test: `backend/internal/instrument/*_integration_test.go`
 
 **Interfaces:**
 - Produces: `instrument.MarketUSDM`; `binance.FuturesSymbols(ctx) ([]string, error)`.
 
-- [ ] **Step 1: Failing test — a USD-M instrument and a spot instrument with the same
+- [x] **Step 1: Failing test — a USD-M instrument and a spot instrument with the same
   exchange symbol are two different instruments.** BTCUSDT spot and BTCUSDT perp share a
   ticker and are not the same thing; an alias table that cannot tell them apart attaches a
   perp fill to a spot position (L8, K10).
-- [ ] **Step 2: Failing test — the perp's settle asset is named.** A USD-M perp settles in
+- [x] **Step 2: Failing test — the perp's settle asset is named.** A USD-M perp settles in
   USDT and that is what funding is paid in; an instrument that does not say so makes the
   funding fold guess.
-- [ ] **Step 3: Migration + exchangeInfo walk. Implement, run, commit.**
+- [x] **Step 3: ~~Migration~~ + exchangeInfo walk. Implement, run, commit.** No migration was
+  needed: M1's `00005_instruments.sql` already has `kind = 'perp'`, a `settle_asset_id` that
+  a CHECK requires on a perp, and `market` inside the alias key — and
+  `TestSpotAndPerpAreDifferentInstruments` already existed. The step is done because the
+  schema was right, not because it was written here.
 
 ---
 

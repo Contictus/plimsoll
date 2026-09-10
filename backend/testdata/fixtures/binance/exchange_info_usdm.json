@@ -1,0 +1,72 @@
+{
+  "_source": "documented",
+  "_endpoint": "/fapi/v1/exchangeInfo",
+  "_why": "the symbols-array fields printed on the USD-M Exchange Information page, transcribed on 2026-09-10, with one row per contractType the walk must tell apart. Spot's exchangeInfo has no contractType at all, which is why the spot sweep cannot be pointed at this endpoint.",
+  "_contract_types": "quoted from the page: PERPETUAL, CURRENT_QUARTER, NEXT_QUARTER, TRADIFI_PERPETUAL",
+  "payload": {
+    "timezone": "UTC",
+    "serverTime": 1757500000000,
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "pair": "BTCUSDT",
+        "contractType": "PERPETUAL",
+        "deliveryDate": 4133404800000,
+        "onboardDate": 1569398400000,
+        "status": "TRADING",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "underlyingType": "COIN"
+      },
+      {
+        "symbol": "ETHUSDT",
+        "pair": "ETHUSDT",
+        "contractType": "PERPETUAL",
+        "deliveryDate": 4133404800000,
+        "onboardDate": 1569398400000,
+        "status": "TRADING",
+        "baseAsset": "ETH",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "underlyingType": "COIN"
+      },
+      {
+        "symbol": "BTCUSDT_260626",
+        "pair": "BTCUSDT",
+        "contractType": "CURRENT_QUARTER",
+        "deliveryDate": 1782518400000,
+        "onboardDate": 1766448000000,
+        "status": "TRADING",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "underlyingType": "COIN"
+      },
+      {
+        "symbol": "DELISTEDUSDT",
+        "pair": "DELISTEDUSDT",
+        "contractType": "PERPETUAL",
+        "deliveryDate": 4133404800000,
+        "onboardDate": 1569398400000,
+        "status": "SETTLING",
+        "baseAsset": "DELISTED",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "underlyingType": "COIN"
+      },
+      {
+        "symbol": "SPXUSDT",
+        "pair": "SPXUSDT",
+        "contractType": "TRADIFI_PERPETUAL",
+        "deliveryDate": 4133404800000,
+        "onboardDate": 1735689600000,
+        "status": "TRADING",
+        "baseAsset": "SPX",
+        "quoteAsset": "USDT",
+        "marginAsset": "USDT",
+        "underlyingType": "INDEX"
+      }
+    ]
+  }
+}
