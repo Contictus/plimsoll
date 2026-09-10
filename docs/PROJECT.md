@@ -139,6 +139,9 @@ ledger_events (
   price           NUMERIC(38,18),
   fee             NUMERIC(38,18),          -- belongs to THIS event only (K18)
   fee_asset       TEXT,
+  asset_id        BIGINT,                  -- what moved, when no pair is traded (00012)
+  transfer_from   TEXT,                    -- TRANSFER only: spot|usdm|coinm|margin|
+  transfer_to     TEXT,                    --   funding|external. Both, or neither (K49)
   event_time      TIMESTAMPTZ NOT NULL,    -- exchange time; drives all calculation (K2)
   ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   raw             JSONB NOT NULL,          -- mandatory; the project's insurance policy
@@ -345,7 +348,7 @@ Directories are created when the module is written, not in advance.
 | **M1** ✅ | Asset/instrument registry + ledger + position engine — **no network** | Fixture replay: spot average cost + realized PnL correct; time-scoped alias resolution tested; idempotency, order-independence and rebuild-equality tests green |
 | **M2** 🟡 | Binance spot backfill | Real account history → ledger; idempotency holds across REST and WS paths; backfill resumes after interruption — **code complete, live verification pending** (see below) |
 | **M3** ✅ | Portfolio + API + lineage | `GET /portfolio` correct; `GET /positions/{id}/lineage` opens a position down to its events |
-| **M3.5** 🟡 | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
+| **M3.5** ✅ | Data quality + intra-venue transfers | Negative-balance / gap / unknown-symbol checks running; a spot ↔ futures transfer is not counted as a sale |
 | **M4** ✅ | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working. `GET /pnl` and the lineage price paths shipped with it; `GET /portfolio/history` deliberately deferred (K48) |
 | **M5** | Perpetuals + collateral | Funding, MMR, margin buffer, liquidation distance; one-way mode |
 | **M6** | Strategy + risk + alerting | Strategy-level net delta; thresholds with hysteresis and cooldown; Telegram/webhook; SSE; dashboard v1 |
@@ -403,30 +406,37 @@ What M3 does **not** have, by decision rather than omission: no total. M4 owns p
 (K40). Adding realized PnL denominated in USDT to realized PnL denominated in BTC would
 produce a number with no unit.
 
-**M3.5 is half shipped, and the half is named.** `asset_balances` folds beside the
-positions over the same events, so a spot account can finally be asked what it holds
-rather than only what its exposures cost (K44). Two of the milestone's checks run against
-it and appear in every portfolio response:
+**M3.5 is shipped.** `asset_balances` folds beside the positions over the same events, so a
+spot account can be asked what it holds rather than only what its exposures cost (K44), and
+a transfer between two of its wallets is no longer a movement at all:
 
 | M3.5 exit criterion | Status |
 |---|---|
 | Negative-balance check running | **done** — `negative_balance`, severity `error`, one reason per asset, and it goes quiet when the deposits pay for the fills |
 | Unknown-symbol check running | **done** — a fee in an uncurated ticker raises `unknown_symbol` and the shortfall is exactly that fee (K45) |
 | Gap check running | **done since M2** — `ws_gap` from the published worker state (K39) |
-| A spot ↔ futures transfer is not counted as a sale | **planned, venue verified** — `docs/plans/2026-09-09-m35-transfers.md` |
+| A spot ↔ futures transfer is not counted as a sale | **done** — `TestASpotToFuturesTransferIsNotCountedAsASale`, through HTTP |
 
-The transfer half was left until last because nothing produces a `TRANSFER` event yet:
-Binance reports an intra-venue move through the wallet endpoint rather than through the spot
-stream, and V1 ingests spot. Verifying that endpoint before planning changed the plan (F10):
-it returns **one row per transfer** with the direction in its `type`, so there are no two
-halves to match. K12's heuristic is what a venue that reports them separately needs, which is
-cross-venue and stays in M8; `transfer_links` is not built here.
+The transfer half was left until last because nothing produced a `TRANSFER` event: Binance
+reports an intra-venue move through the wallet endpoint rather than through the spot stream,
+and V1 ingests spot. Verifying that endpoint before planning changed the plan (F10): it
+returns **one row per transfer** with the direction in its `type`, so there are no two halves
+to match. K12's heuristic is what a venue that reports them separately needs, which is
+cross-venue and stays in M8; `transfer_links` was not built here.
 
-It also changed the convention the balance engine was holding. A transfer's quantity was to
+It also retired the convention the balance engine was holding. A transfer's quantity was to
 be signed, positive in and negative out; with both endpoints named on the event the sign is
-redundant, and a move between two wallets of one integration folds to **no delta at all** —
-the account holds what it held. The signed branch survives for the `external` side, which is
-what M8 turns on.
+redundant and can only disagree with them, so it is now refused. A move between two wallets
+of one integration folds to **no delta at all** — the account holds what it held. The signed
+branch survives as the `external` endpoint, which is what M8 turns on, and which is also what
+makes the internal case falsifiable: without an external transfer reaching the database, a
+projector that skipped `TRANSFER` events entirely would produce numbers identical to one that
+folds them correctly.
+
+The milestone's success is mostly the absence of change, which needs a fourth assertion to be
+worth anything: the position is unchanged, the realized PnL is unchanged, the balance is
+unchanged, **and the transfer is visible in `GET /transactions`**. Without the last one, a
+system that dropped the event on the floor would pass every other check.
 
 **M0 comes first because tenancy cannot be retrofitted.** Adding `account_id` and RLS to
 a schema that already holds a real ledger means rebuilding every table.

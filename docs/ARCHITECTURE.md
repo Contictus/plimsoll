@@ -112,6 +112,7 @@ impossible at the storage layer — not merely unlikely.
 venue_event_id  =  <market>:<kind>:<symbol>:<venue id>
                    spot:trade:BTCUSDT:12345678
                    usdm:income:FUNDING_FEE:98765432
+                   transfer:MAIN_UMFUTURE:11415955596
 ```
 
 Constructed by the normalizer from exchange fields only — never from our own clock, our

@@ -108,14 +108,15 @@ recorded.
 **Why:** "every screen shows a different total" is the failure that makes users believe
 a product is lying to them. See `COMPETITIVE-ANALYSIS.md` §3.3.
 
-### K12 — A transfer is not a sale · `active`
+### K12 — A transfer is not a sale · `extended by K49`
 An asset withdrawn from one venue and deposited into another is **one transfer**.
 Unmatched, the system reads it as a disposal plus an acquisition and PnL collapses.
 `transfer_links` joins the two ledger events. Matching heuristic: same asset + amount
 (within fee tolerance) + time window + txid when available. Unmatched pairs go to a
 queue the user can resolve manually.
 
-V1 covers intra-venue transfers (spot ↔ futures); M8 covers cross-venue.
+V1 covers intra-venue transfers (spot ↔ futures); M8 covers cross-venue. Verifying the venue
+before building it moved most of this decision's machinery into M8 — see K49.
 
 **Why it matters:** this is the entire industry's number-one support topic.
 
@@ -781,6 +782,51 @@ evidence. It lands when there is a history worth folding, which is also when
 ---
 
 ---
+
+---
+
+### K49 - An intra-venue transfer names its endpoints, and folds to nothing · `extends K12`
+
+K12 describes a matching problem: two ledger events, joined by `transfer_links`, with a
+heuristic on asset, amount, time window and txid, and a manual queue for what the heuristic
+cannot resolve. Verifying the endpoint before building it (F10) showed the intra-venue case is
+not that problem at all.
+
+`GET /sapi/v1/asset/transfer` returns **one row per transfer**, and its direction lives in the
+required `type` parameter: `MAIN_UMFUTURE` and `UMFUTURE_MAIN` are two separate queries. The
+row *is* the movement and it names both wallets. There is nothing to match, so `transfer_links`,
+the unmatched queue and the manual-resolution endpoint are M8's, for the venues that genuinely
+report two halves. Building a resolution UI for a problem this endpoint does not have would
+have been the expensive kind of thoroughness.
+
+**The endpoints go on the event; the sign comes off it.** `ledger_events` gained
+`transfer_from` / `transfer_to` over a closed wallet vocabulary — `spot · usdm · coinm ·
+margin · funding · external` — and the balance engine's signed-quantity convention is retired.
+With the direction on the endpoints, a sign is a second statement of the same fact, free to
+disagree with the first, and the disagreement would be silent: a withdrawal of -500 would read
+as money arriving. A negative quantity is now refused by the schema, the normalizer and the
+fold.
+
+**A transfer between two wallets of one integration produces no deltas.** `asset_balances` is
+keyed per integration, not per wallet, so moving USDT from spot to futures leaves the account
+holding exactly what it held. The event stays in the ledger because it is history and lineage;
+it is simply not arithmetic. Read as a disposal, it invents a realized loss — and then a
+phantom re-purchase when the money comes back.
+
+**`external` is in the vocabulary from the first day, and that is what makes the rest
+testable.** Nothing writes one until M8. But a rule that only ever ran on the internal case
+would have quietly become "a transfer moves nothing" — and, worse, without an external
+transfer reaching the database a projector that skipped `TRANSFER` events entirely would
+produce numbers *identical* to one that folds them correctly. No test could have told them
+apart. The branch is not speculative generality; it is the only available observer of the case
+it sits beside.
+
+**The visible half.** Because a transfer changes no total, the transactions listing is the
+only place a reader meets it. `GET /transactions` therefore carries both endpoints, and the
+milestone's exit test asserts four things at once: the position is unchanged, the realized PnL
+is unchanged, the balance is unchanged, and the transfer is *there*. A milestone whose success
+is mostly the absence of change needs that fourth assertion, or a system that dropped the event
+on the floor would pass.
 
 ---
 

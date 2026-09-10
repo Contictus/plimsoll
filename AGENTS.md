@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K48). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K49). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -226,7 +226,7 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K48 decision register
+  DECISIONS.md             K1–K49 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
@@ -268,7 +268,7 @@ never in advance. Listed because each one is a boundary already decided, so work
 belongs in it should not be quietly absorbed by a neighbour.
 
 ```
-    transfer/      transfer matching                                      (K12, M3.5)
+    transfer/      cross-venue transfer matching                          (K12, M8)
     collateral/    MMR / margin buffer                                    (M5)
     strategy/      sleeve tagging and strategy-level aggregation          (K13, M6)
     risk/          exposure, leverage, thresholds                         (M6)

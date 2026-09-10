@@ -113,7 +113,7 @@ func (q *Queries) ListPositionEventsAfter(ctx context.Context, arg ListPositionE
 const streamAccountEvents = `-- name: StreamAccountEvents :many
 SELECT e.seq, e.integration_id, e.venue_event_id, e.venue_sequence, e.source, e.event_type,
        e.instrument_id, e.asset_id, e.side, e.quantity, e.price, e.fee, e.fee_asset,
-       e.event_time, e.ingested_at,
+       e.transfer_from, e.transfer_to, e.event_time, e.ingested_at,
        i.canonical_symbol AS instrument_symbol,
        a.canonical_symbol AS asset_symbol
 FROM ledger_events e
@@ -152,6 +152,8 @@ type StreamAccountEventsRow struct {
 	Price            decimal.NullDecimal
 	Fee              decimal.NullDecimal
 	FeeAsset         *string
+	TransferFrom     *string
+	TransferTo       *string
 	EventTime        time.Time
 	IngestedAt       time.Time
 	InstrumentSymbol *string
@@ -195,6 +197,8 @@ func (q *Queries) StreamAccountEvents(ctx context.Context, arg StreamAccountEven
 			&i.Price,
 			&i.Fee,
 			&i.FeeAsset,
+			&i.TransferFrom,
+			&i.TransferTo,
 			&i.EventTime,
 			&i.IngestedAt,
 			&i.InstrumentSymbol,
