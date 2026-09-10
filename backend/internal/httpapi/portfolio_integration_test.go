@@ -31,6 +31,14 @@ var moneyFields = map[string]bool{
 	"quantity": true, "avg_entry_price": true, "cost_basis": true,
 	"realized_pnl": true, "amount": true, "market_value": true, "unrealized_pnl": true,
 	"price_usd": true, "value_usd": true, "total_value_usd": true,
+
+	// The margin picture (M5). liquidation_distance is a ratio rather than money, and it
+	// is here for the same reason: a client that parsed it as a float would round the one
+	// number a leveraged account is read for.
+	"margin_balance": true, "wallet_balance": true, "maintenance_margin": true,
+	"available_balance": true, "margin_buffer": true, "entry_price": true,
+	"mark_price": true, "liquidation_price": true, "notional": true, "leverage": true,
+	"maint_margin": true, "liquidation_distance": true, "total": true,
 }
 
 // requireMoneyIsString walks the decoded response and fails on any money field that is not

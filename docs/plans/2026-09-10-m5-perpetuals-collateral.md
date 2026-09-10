@@ -203,15 +203,16 @@ Every task's requirements implicitly include this section.
 **Interfaces:**
 - Produces: `GET /risk`, `GET /funding`.
 
-- [ ] **Step 1: Failing test — `GET /risk` reports equity, margin buffer, maintenance
+- [x] **Step 1: Failing test — `GET /risk` reports equity, margin buffer, maintenance
   margin, and per-position liquidation distance**, every number a string, from ONE snapshot
   named in `as_of` (L10).
-- [ ] **Step 2: Failing test — a stale snapshot is served WITH `collateral_stale`, never
+- [x] **Step 2: Failing test — a stale snapshot is served WITH `collateral_stale`, never
   silently** (L11), and a missing one is `collateral_unavailable` rather than a zero buffer.
   A zero margin buffer and an unknown one are opposite claims and must not render the same.
-- [ ] **Step 3: Failing test — `GET /funding` sums funding per symbol over a window**, from
+- [x] **Step 3: Failing test — `GET /funding` sums funding per symbol over a window**, from
   the ledger, and agrees with the events it names.
-- [ ] **Step 4: M5's exit criterion end to end**: a funded futures account with one perp
+- [x] **Step 4: M5's exit criterion end to end**, plus Task 5's deferred supervisor wiring:
+  `collateral.Capture` now runs on a ticker of its own inside the supervisor (K50). : a funded futures account with one perp
   position reports a liquidation distance that moves when the mark moves and a buffer that
   falls when the position grows. Update PROJECT.md §8 and DECISIONS.md.
 

@@ -44,9 +44,12 @@ type deps struct {
 	limiter binance.Limiter
 	symbols []string
 	restURL string
-	wsURL   string
-	ownerID string
-	log     *slog.Logger
+	// futuresURL is the USD-M host. Separate from restURL because they are different hosts
+	// with different paths, and a test stack points both at one recorder.
+	futuresURL string
+	wsURL      string
+	ownerID    string
+	log        *slog.Logger
 }
 
 // supervise runs one integration for as long as the process lives, claiming it whenever it
@@ -97,6 +100,10 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 		Credential:    cred,
 		Limiter:       d.limiter,
 		BaseURL:       d.restURL,
+		// The USD-M host is a second base URL rather than a second client: the two share
+		// one credential and one weight budget, and Binance's limits are per IP, so a
+		// separate client would be a second budget for one account's requests (K24).
+		FuturesBaseURL: d.futuresURL,
 	})
 	if err != nil {
 		return err
@@ -164,6 +171,22 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 		// A fold that fails does not stop the ingestion, so this is the only place an
 		// operator hears about it. Warn rather than Error: the reader is told independently
 		// by the API, and the ledger -- the part that cannot be rebuilt -- is still filling.
+		// The margin picture, refreshed beside the feed. It is not ingestion: nothing about
+		// it reaches the ledger, because nothing in the ledger can say what the venue's
+		// margin engine believed at 12:00 (L3). It is captured, and /risk says how old it is.
+		Capture: worker.CollateralCapturer(worker.CaptureConfig{
+			DB:            d.pool,
+			AccountID:     assignment.AccountID,
+			IntegrationID: assignment.IntegrationID,
+			OwnerID:       d.ownerID,
+			Source:        client,
+			Resolver:      registry,
+			Now:           time.Now,
+		}),
+		OnCaptureError: func(err error) {
+			d.log.Warn("margin capture failed; ingestion continues",
+				"integration_id", assignment.IntegrationID, "error", err)
+		},
 		OnProjectError: func(err error) {
 			d.log.Warn("projection failed; ingestion continues",
 				"integration_id", assignment.IntegrationID, "error", err)

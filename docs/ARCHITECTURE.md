@@ -285,6 +285,8 @@ Replaces the boolean `stale` (K23, L11). It is API surface, not diagnostics:
 | `projection_lagging` | events are in the ledger that the fold has not reached (K38) |
 | `lineage_mismatch` | replaying a position's events did not reproduce the stored projection (K43) |
 | `negative_balance` | the ledger implies holding less than nothing of an asset (K14, K44) |
+| `collateral_stale` | the captured margin picture is older than the API's tolerance: served, because an ageing liquidation distance is still the best answer there is (M5) |
+| `collateral_unavailable` | no capture exists for an active integration, so the margin buffer is unknown -- and the response omits the integration rather than rendering it at zero, because unknown and zero are opposite claims (M5) |
 
 `status` is the worst severity present. A caller that reads nothing but `status` is
 still safe, which is the point.

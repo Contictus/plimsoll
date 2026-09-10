@@ -828,6 +828,37 @@ is unchanged, the balance is unchanged, and the transfer is *there*. A milestone
 is mostly the absence of change needs that fourth assertion, or a system that dropped the event
 on the floor would pass.
 
+### K50 - An unknown margin buffer is not a margin buffer of zero
+
+`GET /risk` reports per integration and never sums across them, and an integration whose
+capture is missing is **omitted from the response** while raising `collateral_unavailable` at
+error severity.
+
+The alternative -- one account-level total, with a missing integration contributing zero --
+fails in the worst available direction. A margin buffer of zero says liquidation is imminent;
+an unknown one says nothing at all. They are opposite claims, and a screen that renders them
+identically is wrong at exactly the moment it is being read hardest. Summed into a headline
+number the failure is worse still, because the omission is invisible: the total simply looks
+smaller, and nothing on the page says an integration is missing from it.
+
+**A stale capture is served, not withheld.** `collateral_stale` is a warning and the numbers
+come with it. An hour-old liquidation distance is still the best answer anyone has, and
+withholding it in favour of nothing would trade a qualified answer for a blank -- which is the
+same mistake with better manners. The `since` on the reason is the capture's own instant,
+which is knowable exactly: it is when the numbers stopped being current, not when we noticed.
+
+**`as_of` is the OLDEST capture in the response, not the newest.** A screen is only as current
+as its stalest number. Dating the whole of it by its luckiest one is how a response comes to
+claim a currency it does not have -- the same rule that makes a snapshot's own `as_of` the
+earlier of its two halves (F14).
+
+**The capture loop and the endpoint that reads it shipped in one change.** Task 5 wrote the
+capture and deliberately left it unwired; wiring it a task later, beside `GET /risk`, is what
+made the test possible that names neither -- run the supervisor, read the endpoint, see the
+buffer. M2 shipped a projector nothing called (K38) and the symptom was an endpoint answering
+"you hold nothing" for a full account. A capture loop with no reader is the same defect facing
+the other way, and it is invisible for exactly as long.
+
 ---
 
 ## Deliberately Out of Scope

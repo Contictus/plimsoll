@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K49). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K50). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -226,7 +226,7 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K49 decision register
+  DECISIONS.md             K1–K50 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
@@ -255,6 +255,7 @@ backend/
     portfolio/     the read model: holdings, totals, history at T, pnl (K43, K47, K48)
     marketdata/    price ingest: REST snapshot, live stream, minute ticks   (K7, M4)
     valuation/     one run, USD numeraire, auditable price paths        (K11, K17, M4)
+    collateral/    the margin picture: capture, buffer, MMR tiers      (K6, K50, M5)
     freshness/     reason codes, severities, the response envelope        (K23, L11)
     httpapi/       routing, session cookie, handlers                      (K16, K27)
     obs/           slog with secret redaction + OTel                      (L13)
@@ -269,7 +270,6 @@ belongs in it should not be quietly absorbed by a neighbour.
 
 ```
     transfer/      cross-venue transfer matching                          (K12, M8)
-    collateral/    MMR / margin buffer                                    (M5)
     strategy/      sleeve tagging and strategy-level aggregation          (K13, M6)
     risk/          exposure, leverage, thresholds                         (M6)
     alert/         hysteresis, cooldown, delivery                         (M6)
