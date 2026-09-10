@@ -1,0 +1,68 @@
+{
+  "_source": "documented",
+  "_endpoint": "/fapi/v1/income",
+  "_why": "the response shape printed on the Get Income History page, transcribed on 2026-09-10 (F16), with one row per incomeType this fold has to treat differently. The page lists eight types and refers to fifteen more it does not display, so this fixture is a sample of a vocabulary that cannot be read in full -- which is why the code whitelists.",
+  "_note_transfer": "the TRANSFER row is the SAME movement M3.5 already ingested from the wallet endpoint (F12). Folding it here as well moves the money twice. It is skipped with a named error, so 'we chose not to' and 'we forgot' do not look the same in a log.",
+  "payload": [
+    {
+      "symbol": "BTCUSDT",
+      "incomeType": "FUNDING_FEE",
+      "income": "-0.37500000",
+      "asset": "USDT",
+      "info": "FUNDING_FEE",
+      "time": 1757404800000,
+      "tranId": 9689322392,
+      "tradeId": ""
+    },
+    {
+      "symbol": "BTCUSDT",
+      "incomeType": "FUNDING_FEE",
+      "income": "1.25000000",
+      "asset": "USDT",
+      "info": "FUNDING_FEE",
+      "time": 1757433600000,
+      "tranId": 9689322393,
+      "tradeId": ""
+    },
+    {
+      "symbol": "",
+      "incomeType": "TRANSFER",
+      "income": "-500.00000000",
+      "asset": "USDT",
+      "info": "TRANSFER",
+      "time": 1757400000000,
+      "tranId": 9689322394,
+      "tradeId": ""
+    },
+    {
+      "symbol": "BTCUSDT",
+      "incomeType": "REALIZED_PNL",
+      "income": "500.00000000",
+      "asset": "USDT",
+      "info": "REALIZED_PNL",
+      "time": 1757400600000,
+      "tranId": 9689322395,
+      "tradeId": "8886775"
+    },
+    {
+      "symbol": "BTCUSDT",
+      "incomeType": "COMMISSION",
+      "income": "-6.20000000",
+      "asset": "USDT",
+      "info": "COMMISSION",
+      "time": 1757400600000,
+      "tranId": 9689322396,
+      "tradeId": "8886775"
+    },
+    {
+      "symbol": "",
+      "incomeType": "INVENTED_TYPE",
+      "income": "1.00000000",
+      "asset": "USDT",
+      "info": "",
+      "time": 1757400000000,
+      "tranId": 9689322397,
+      "tradeId": ""
+    }
+  ]
+}
