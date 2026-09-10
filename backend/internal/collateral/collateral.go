@@ -39,6 +39,7 @@ var (
 // deduction that makes the tiers continuous rather than a step function jumping at every
 // boundary.
 type Bracket struct {
+	Bracket          int
 	NotionalFloor    decimal.Decimal
 	NotionalCap      decimal.Decimal
 	MaintMarginRatio decimal.Decimal

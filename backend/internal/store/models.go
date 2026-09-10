@@ -66,6 +66,31 @@ type BackfillProgress struct {
 	UpdatedAt     time.Time
 }
 
+type CollateralPosition struct {
+	AccountID        uuid.UUID
+	IntegrationID    uuid.UUID
+	InstrumentID     int64
+	Quantity         decimal.Decimal
+	EntryPrice       decimal.Decimal
+	MarkPrice        decimal.Decimal
+	LiquidationPrice decimal.Decimal
+	Notional         decimal.Decimal
+	Leverage         decimal.Decimal
+	MaintMargin      decimal.Decimal
+}
+
+type CollateralSnapshot struct {
+	AccountID         uuid.UUID
+	IntegrationID     uuid.UUID
+	AsOf              time.Time
+	CapturedAt        time.Time
+	MarginBalance     decimal.Decimal
+	WalletBalance     decimal.Decimal
+	UnrealizedPnl     decimal.Decimal
+	MaintenanceMargin decimal.Decimal
+	AvailableBalance  decimal.Decimal
+}
+
 type Instrument struct {
 	ID              int64
 	CanonicalSymbol string
@@ -147,6 +172,18 @@ type LedgerEvent struct {
 	FeeAssetID    *int64
 	TransferFrom  *string
 	TransferTo    *string
+}
+
+type LeverageBracket struct {
+	AccountID        uuid.UUID
+	IntegrationID    uuid.UUID
+	InstrumentID     int64
+	Bracket          int32
+	NotionalFloor    decimal.Decimal
+	NotionalCap      decimal.Decimal
+	MaintMarginRatio decimal.Decimal
+	Cum              decimal.Decimal
+	CapturedAt       time.Time
 }
 
 type Position struct {

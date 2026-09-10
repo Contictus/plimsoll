@@ -261,3 +261,44 @@ func NormalizeFuturesTrade(
 func FuturesTradeID(symbol string, tradeID int64) string {
 	return fmt.Sprintf("usdm:trade:%s:%d", symbol, tradeID)
 }
+
+// The USD-M account endpoints, with the weights verified on 2026-09-10 (F14, F15).
+const (
+	weightFuturesAccount  = 5 // GET /fapi/v3/account
+	weightPositionRisk    = 1 // GET /fapi/v3/positionRisk
+	weightLeverageBracket = 1 // GET /fapi/v1/leverageBracket
+)
+
+// FuturesAccount returns the account's margin totals, including the maintenance requirement
+// -- which positionRisk does NOT carry (F14). This is the endpoint the margin buffer comes
+// from.
+func (c *Client) FuturesAccount(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:    "/fapi/v3/account",
+		weight:  weightFuturesAccount,
+		signed:  true,
+		futures: true,
+	})
+}
+
+// PositionRisk returns every position's mark, notional and liquidation price. The
+// liquidation price is read and never computed (K6).
+func (c *Client) PositionRisk(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:    "/fapi/v3/positionRisk",
+		weight:  weightPositionRisk,
+		signed:  true,
+		futures: true,
+	})
+}
+
+// LeverageBracket returns the maintenance-margin tier table. Signed because a user's
+// brackets depend on their own tier, so this is account data rather than market data.
+func (c *Client) LeverageBracket(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, request{
+		path:    "/fapi/v1/leverageBracket",
+		weight:  weightLeverageBracket,
+		signed:  true,
+		futures: true,
+	})
+}
