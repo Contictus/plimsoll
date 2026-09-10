@@ -9,6 +9,7 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/Contictus/plimsoll/backend/internal/store"
+	"github.com/Contictus/plimsoll/backend/internal/strategy"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/Contictus/plimsoll/backend/internal/valuation"
 	"github.com/google/uuid"
@@ -87,6 +88,12 @@ func read(ctx context.Context, q *store.Queries, accountID uuid.UUID, w Window) 
 	if err != nil {
 		return Input{}, fmt.Errorf("portfolio: read fee assets for %s: %w", accountID, err)
 	}
+	// Read in the same transaction as the positions it labels, so a tag applied between two
+	// reads cannot label a position the response did not include (K11, L10).
+	tags, err := strategy.Of(ctx, q, accountID)
+	if err != nil {
+		return Input{}, err
+	}
 
 	// One run, read inside the same transaction as everything else, so the prices and the
 	// quantities they multiply are one consistent view (K11, L10). A missing run is not an
@@ -140,7 +147,10 @@ func read(ctx context.Context, q *store.Queries, accountID uuid.UUID, w Window) 
 
 	positions := make([]Position, 0, len(rows))
 	for _, r := range rows {
+		tag := tags[strategy.PositionKey{IntegrationID: r.IntegrationID, InstrumentID: r.InstrumentID}]
 		positions = append(positions, Position{
+			Strategy:      tag.Name,
+			StrategyID:    tag.ID,
 			IntegrationID: r.IntegrationID,
 			InstrumentID:  r.InstrumentID,
 			Symbol:        r.CanonicalSymbol,

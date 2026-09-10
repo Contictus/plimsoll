@@ -316,7 +316,15 @@ func TestAStrategyAssignmentSurvivesARebuild(t *testing.T) {
 	ctx := context.Background()
 	accountID, integrationID := seedIntegration(t)
 	instrumentID := seedInstrument(t)
-	strategyID := uuid.New()
+
+	// A real strategy row, because M6 gave the tag a foreign key: the id used to be any uuid
+	// the caller liked, which meant a tag could name a group that never existed.
+	var strategyID uuid.UUID
+	require.NoError(t, tenancy.InTxRaw(ctx, appPool(t), accountID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`INSERT INTO strategies (account_id, name) VALUES ($1, $2) RETURNING id`,
+			accountID, "rebuild-probe-"+uuid.NewString()).Scan(&strategyID)
+	}))
 
 	appendEvents(t, accountID,
 		storable(trade(ledger.SideBuy, "1", "100", 1), accountID, integrationID, instrumentID))

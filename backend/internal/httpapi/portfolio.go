@@ -49,6 +49,11 @@ type positionBody struct {
 	MarketValue   string `json:"market_value"   doc:"signed, in the run's numeraire; empty when unpriced"`
 	UnrealizedPnL string `json:"unrealized_pnl" doc:"market value less cost, both at this run; empty when unpriced"`
 
+	// Strategy is the group the user put this position in, empty when untagged, and the id
+	// beside it so a client can re-tag without looking the name up again.
+	Strategy   string `json:"strategy"`
+	StrategyID string `json:"strategy_id"`
+
 	Flat          bool      `json:"flat"            doc:"quantity is zero; kept for its realized PnL and fees"`
 	LastEventTime time.Time `json:"last_event_time" doc:"the event time of the last fill folded into this row"`
 }
@@ -158,6 +163,8 @@ func renderPosition(h portfolio.Holding) positionBody {
 		Fees:          renderFees(h.Fees),
 		MarketValue:   nullText(h.MarketValue),
 		UnrealizedPnL: nullText(h.UnrealizedPnL),
+		Strategy:      h.Strategy,
+		StrategyID:    nullUUID(h.StrategyID),
 		Flat:          h.Flat,
 		LastEventTime: h.LastEventTime,
 	}
@@ -347,6 +354,16 @@ func (d Deps) registerPortfolio(api huma.API) {
 // nullText renders an optional money value. An absent one is "" rather than "0": a missing
 // price and a price of zero are different claims, and collapsing them is how a deposit
 // acquires a cost basis (L1).
+// nullUUID renders the zero uuid as an empty string rather than as
+// 00000000-0000-0000-0000-000000000000, which a client would otherwise have to know to treat
+// as absent -- and one that did not would send it back as a real id.
+func nullUUID(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
+}
+
 func nullText(d decimal.NullDecimal) string {
 	if !d.Valid {
 		return ""

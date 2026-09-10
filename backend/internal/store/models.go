@@ -241,6 +241,14 @@ type Session struct {
 	LastSeenAt time.Time
 }
 
+type Strategy struct {
+	ID        uuid.UUID
+	AccountID uuid.UUID
+	Name      string
+	Kind      string
+	CreatedAt time.Time
+}
+
 type ValuationPrice struct {
 	RunID      int64
 	AssetID    int64
