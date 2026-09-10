@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Contictus/plimsoll/backend/internal/collateral"
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/google/uuid"
@@ -59,6 +60,13 @@ func (r captureRunner) Capture(ctx context.Context) error {
 		if err := GuardLease(ctx, q, r.cfg.AccountID, r.cfg.IntegrationID, r.cfg.OwnerID); err != nil {
 			return err
 		}
-		return collateral.Save(ctx, q, r.cfg.AccountID, r.cfg.IntegrationID, snapshot, now().UTC())
+		if err := collateral.Save(ctx, q, r.cfg.AccountID, r.cfg.IntegrationID,
+			snapshot, now().UTC()); err != nil {
+			return err
+		}
+		// The margin picture moved, so a risk page open in a browser is told to re-read. In
+		// the same transaction as the snapshot: a hint that arrived first would send the
+		// reader back for numbers that were not there yet (K51).
+		return events.Publish(ctx, q, r.cfg.AccountID, events.TopicRisk)
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/ledger"
 	"github.com/Contictus/plimsoll/backend/internal/position"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -124,7 +125,22 @@ func Project(
 			res.Rebuilt = true
 		}
 		res.EventsFolded, err = fold(ctx, q, accountID, integrationID)
-		return err
+		if err != nil {
+			return err
+		}
+		if res.EventsFolded == 0 && !res.Rebuilt {
+			// Nothing moved, so nobody is told to re-read. A hint per tick would be a
+			// browser re-reading the same numbers every two seconds forever.
+			return nil
+		}
+		// Published inside the fold's own transaction, so a subscriber is never told to
+		// re-read a projection that then rolls back (K51).
+		for _, topic := range []string{events.TopicPositions, events.TopicPortfolio} {
+			if err := events.Publish(ctx, q, accountID, topic); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return res, err
 }

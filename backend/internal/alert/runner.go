@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/portfolio"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
@@ -133,6 +134,12 @@ func record(
 				return fmt.Errorf("alert: record firing for rule %s: %w", f.RuleID, err)
 			}
 			ids[f.RuleID] = id
+		}
+		if len(firings) > 0 {
+			// In the same transaction as the rows, so a client told to re-read finds them.
+			if err := events.Publish(ctx, q, d.AccountID, events.TopicAlerts); err != nil {
+				return err
+			}
 		}
 
 		for id, s := range next {

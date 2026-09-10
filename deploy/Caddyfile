@@ -8,6 +8,17 @@
 # it runs behind Caddy or bare in a test.
 :8080 {
 	handle_path /api/* {
+		# Server-Sent Events must not be buffered: with the default buffering the first hint
+		# reaches the browser when the connection closes, which is the moment it stops being
+		# useful. flush_interval -1 passes bytes straight through (K51).
+		#
+		# The matcher runs after handle_path has stripped /api, which is why it matches
+		# /stream/* and not /api/stream/*.
+		@stream path /stream/*
+		reverse_proxy @stream api:8000 {
+			flush_interval -1
+		}
+
 		reverse_proxy api:8000
 	}
 

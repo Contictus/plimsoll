@@ -15,6 +15,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
 	"github.com/Contictus/plimsoll/backend/internal/crypto"
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/google/uuid"
@@ -45,6 +46,7 @@ func newServerWithPegs(t *testing.T, pegs string) *httptest.Server {
 		Now:       time.Now,
 		PegAssets: pegs,
 		Keys:      keys,
+		Events:    events.PoolSubscriber{Pool: pool},
 	}))
 	t.Cleanup(srv.Close)
 	return srv

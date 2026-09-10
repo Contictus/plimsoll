@@ -16,6 +16,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/auth"
 	"github.com/Contictus/plimsoll/backend/internal/crypto"
+	"github.com/Contictus/plimsoll/backend/internal/events"
 	"github.com/Contictus/plimsoll/backend/internal/httpapi"
 	"github.com/Contictus/plimsoll/backend/internal/obs"
 	"github.com/Contictus/plimsoll/backend/internal/store"
@@ -101,6 +102,9 @@ func run(log *slog.Logger) error {
 		// worker's job, and a process that cannot decrypt is one a leaked session cannot
 		// make decrypt.
 		Keys: keys,
+		// The live-update bus. It holds one connection per open stream, which is the cost
+		// of LISTEN being a property of a session (K51).
+		Events: events.PoolSubscriber{Pool: pool},
 	})
 
 	srv := &http.Server{
