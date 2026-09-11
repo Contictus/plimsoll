@@ -56,4 +56,12 @@ echo "--- the scenario projection refuses without a session ---"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST   -H 'content-type: application/json' -d '{"shocks":{"BTC":"-0.2"}}'   http://localhost:8080/api/risk/scenario)
 test "$code" = "401"
 
+echo "--- the transfer register refuses without a session ---"
+# It names an account's venues and the movements between them.
+code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/transfers)
+test "$code" = "401"
+
+echo "--- transfers have a page ---"
+curl -fsS http://localhost:8080/transfers | grep -q "Transfers"
+
 echo "SMOKE: OK"

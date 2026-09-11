@@ -65,6 +65,12 @@ const (
 	// KindClockSkew -- our clock and the venue's disagree beyond tolerance, which makes every
 	// timestamp-ordered fold suspect (L7).
 	KindClockSkew Kind = "clock_skew"
+
+	// KindUnmatchedTransfer -- a withdrawal or a deposit with no other half. Often not a
+	// matcher failure at all: Binance does not publish the enums that would let its
+	// withdrawals be normalized (F5, B2), so the outbound half of a Binance-to-Bybit move was
+	// never ingestible. Left silent, that documentation gap looks like a balance (K57).
+	KindUnmatchedTransfer Kind = "unmatched_transfer"
 )
 
 // ReconciliationKinds and CoherenceKinds are what each producer is RESPONSIBLE for.
@@ -79,6 +85,11 @@ var (
 	CoherenceKinds = []Kind{
 		KindNegativeBalance, KindUnresolvedAsset, KindFeePriceMissing, KindClockSkew,
 	}
+
+	// TransferKinds is the matcher's own. Its own pass, because it runs on a different
+	// schedule from both the coherence checks and reconciliation, and a pass may only close
+	// what it owns (K53).
+	TransferKinds = []Kind{KindUnmatchedTransfer}
 )
 
 // Severity ranks a finding the same way freshness ranks a reason, and for the same purpose:

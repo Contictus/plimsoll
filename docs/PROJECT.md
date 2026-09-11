@@ -287,7 +287,9 @@ DELETE /integrations/{id}
 GET    /data-quality                  open findings, worst first; ?history=true for closed
 POST   /integrations/{id}/resync      rewind the walk; never writes a correction (K55)
 GET    /assets                        canonical registry + alias resolution
-GET    /transfers                     ?unmatched=true
+GET    /transfers                     joined movements; unmatched legs are in /data-quality
+POST   /transfers                     join two legs the matcher would not (K57)
+DELETE /transfers/{id}                undo a join; touches no event (L2)
 POST   /transfers/{out}/link/{in}     manual transfer matching
 GET    /strategies                    POST /strategies
 GET    /alerts
@@ -354,7 +356,32 @@ Directories are created when the module is written, not in advance.
 | **M6** ✅ | Strategy + risk + alerting | Strategy tags that survive a projection rebuild (K30); a risk engine reporting gross AND directional leverage, so a delta-neutral basis trade does not read as 2× (K13); `GET /exposure` agreeing with `/portfolio` on one run; alert rules with hysteresis and cooldown — twenty crossings, one alert — delivered to Telegram or a webhook and recorded either way; SSE over LISTEN/NOTIFY (K51); the USD-M history walk M5 left uncalled, and the live futures stream as its trigger (F17, F19, F20); dashboard v1 |
 | **M7** ✅ | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) decided from evidence rather than sign (K54); a register where a problem has a lifetime rather than a timestamp, so a disagreement lasting a day is one finding and not 288 (K53); `GET /data-quality`; a resync that rewinds the walk and writes no correction (K55); and `reconciliation_mismatch` — declared in M0 and never produced until now — reaching `/portfolio` from an open finding |
 | **M7.5** ✅ | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock. A shock names its asset and the unshocked hold still, so a hedged book is shown on both legs and no correlation is invented (K56); maintenance is recomputed from the venue's tier table at the shocked notional rather than scaled, because a shock worth modelling usually crosses a tier (F15); an uncaptured bracket table makes the buffer unavailable rather than larger |
-| **M8** | Bybit + cross-venue transfers | Two sources normalized correctly into one portfolio; withdrawals match deposits |
+| **M8** 🟡 | Bybit + cross-venue transfers | **Cross-venue matching is done and proven**: a withdrawal under one integration and a deposit under another are joined by txid (proof) or by amount and time (a guess, marked as such), one-to-one, with ambiguity refused rather than broken; a leg with no other half becomes a data-quality finding naming what it is mistaken for; `GET/POST /transfers` and a manual join the user can undo. **Bybit ingest is not built** — its facts are verified (B1–B4) and its client is not written; see below |
+
+**M8 is half shipped, and the half that is missing is named.** Cross-venue matching is
+complete and proven against a real Postgres: two legs are joined, the ledger is byte-identical
+either side of the match, a re-run produces the same links rather than a duplicate-key error,
+and an unmatched leg becomes a finding that says what it is mistaken for. The matcher is pure
+and mutation-tested; nine mutations, no survivors.
+
+Bybit ingest is **not built**, and that is a decision rather than an omission:
+
+- Its facts are verified and written down (`BYBIT-API-NOTES.md`, B1-B4): the signature scheme,
+  both endpoints, both status enums, the window and page limits. Nothing there is remembered.
+- **B2 is the finding that shaped the milestone.** Bybit publishes the deposit and withdrawal
+  status enums; Binance publishes neither (F5, re-checked 2026-09-11 and still the garbled
+  fragment `0(0 Sent, 2 Approval 3 4 6)`). So a Bybit withdrawal could be normalized where a
+  Binance one still cannot -- which means an account moving coins from Binance to Bybit
+  produces a deposit with no withdrawal to match. That is a documentation gap, not a matcher
+  failure, and K57 makes it a visible finding rather than silence.
+- What is **not** verified is whether a read-only Bybit key can reach those endpoints at all,
+  and what Bybit's permission model calls that scope. Binance's equivalent needed a dedicated
+  endpoint and a finding of its own (F8); the same verification is owed here and cannot be done
+  without a key.
+
+Writing a second venue's client against unverified permissions, with no key to record a fixture
+from, is how a venue ends up with a normalizer nothing calls -- which this project has now done
+twice (K38, and again in M5's futures walk). The client waits for the same key M2 waits for.
 
 **M2 is code complete and not shipped.** Every piece is written and tested against
 recorded and documented fixtures: the signed REST client, the normalizer, the resumable

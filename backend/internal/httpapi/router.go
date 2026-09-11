@@ -122,6 +122,7 @@ func NewRouter(d Deps) http.Handler {
 	d.registerAlerts(api)
 	d.registerQuality(api)
 	d.registerScenario(api)
+	d.registerTransfers(api)
 
 	// Not a Huma operation: a response that never ends is not a value returned once (K51).
 	d.registerStreams(router)

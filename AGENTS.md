@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K56). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K57). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -227,10 +227,12 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K56 decision register
+  DECISIONS.md             K1–K57 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
+  BINANCE-API-NOTES.md     F1-F21, every venue fact verified against the docs
+  BYBIT-API-NOTES.md       B1-B4, the same for the second venue
   plans/                   per-milestone implementation plans
 backend/
   cmd/api/                 HTTP process — reads only, never writes the ledger
@@ -264,6 +266,7 @@ backend/
     scenario/      the price shock: equity and buffer after a move -- pure (K56, M7.5)
     quality/       the findings register + the checks needing no venue call (K14, K53)
     reconciliation/  our fold vs the venue's answer, and the classifier   (K54, K55, M7)
+    transfer/      cross-venue matching: two halves, one movement      (K12, K57, M8)
     alert/         hysteresis, cooldown, delivery, the record              (M6, L13)
     httpapi/       routing, session cookie, handlers                      (K16, K27)
     obs/           slog with secret redaction + OTel                      (L13)
@@ -273,13 +276,14 @@ frontend/          Next.js dashboard: portfolio, risk, exposure, alerts     (K27
 deploy/            compose topology, Caddyfile, postgres init
 ```
 
-**Planned.** Not written, and deliberately so — a directory is created when its module is,
-never in advance. Listed because each one is a boundary already decided, so work that
-belongs in it should not be quietly absorbed by a neighbour.
+**Planned.** Empty as of M8: every boundary this file ever listed as coming has been written.
+A directory is created when its module is, never in advance — so when the next one is decided
+it is named here first, and work that belongs in it is not quietly absorbed by a neighbour.
 
-```
-    transfer/      cross-venue transfer matching                          (K12, M8)
-```
+The one thing still outstanding is not a directory. `exchange/bybit/` holds the venue's
+verified facts (`docs/BYBIT-API-NOTES.md`, B1–B4) and no client: M8 matched the two halves of
+a cross-venue movement, and a second full ingest is a later milestone. Half-building one is how
+a venue ends up with a normalizer nothing calls (K38, twice).
 
 ---
 
