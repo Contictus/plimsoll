@@ -12,6 +12,12 @@ import (
 type Assignment struct {
 	AccountID     uuid.UUID
 	IntegrationID uuid.UUID
+
+	// Exchange is which venue this is. Carried on the assignment because the worker has to
+	// know before it builds anything: the two venues sign differently, and a Bybit
+	// integration handed a Binance client authenticates nothing -- the failure arriving as a
+	// signature rejection rather than as anything that names the real mistake (B1, M8).
+	Exchange string
 }
 
 // ActiveIntegrations lists every integration there is anything to run for, across accounts.
@@ -34,6 +40,7 @@ func ActiveIntegrations(ctx context.Context, db store.DBTX) ([]Assignment, error
 		out = append(out, Assignment{
 			AccountID:     row.AccountID,
 			IntegrationID: row.IntegrationID,
+			Exchange:      row.Exchange,
 		})
 	}
 	return out, nil

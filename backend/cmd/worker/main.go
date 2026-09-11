@@ -159,7 +159,15 @@ func run(log *slog.Logger) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			supervise(ctx, d, assignment)
+			// The venue decides which supervisor runs. Dispatching here rather than inside
+			// one supervisor keeps the two venues' assembly apart: they sign differently,
+			// page differently, and only one of them has a stream (B1, B3, M8).
+			switch assignment.Exchange {
+			case "bybit":
+				superviseBybit(ctx, d, assignment)
+			default:
+				supervise(ctx, d, assignment)
+			}
 		}()
 	}
 
@@ -233,6 +241,7 @@ func connect(
 		symbols:      symbols,
 		restURL:      restURL,
 		futuresURL:   envOr("PLIMSOLL_BINANCE_FUTURES_URL", binance.FuturesBaseURL),
+		bybitURL:     envOr("PLIMSOLL_BYBIT_REST_URL", "https://api.bybit.com"),
 		futuresWsURL: envOr("PLIMSOLL_BINANCE_FUTURES_WS_URL", binance.FuturesStreamURL),
 		wsURL:        envOr("PLIMSOLL_BINANCE_WS_URL", binance.SpotStreamURL),
 		// Process-unique, minted per start. Never a hostname: two processes on one host

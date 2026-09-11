@@ -1,0 +1,43 @@
+{
+  "_source": "documented",
+  "_why": "GET /v5/asset/withdraw/query-record. The `result` object only. Three rows: settled, confirmed-on-chain-but-not-finished (BlockchainConfirmed, which the venue lists separately from success and which this code therefore does not treat as settled), and rejected.",
+  "rows": [
+    {
+      "coin": "USDT",
+      "chain": "TRX",
+      "amount": "500.50000000",
+      "txID": "0xdeadbeefcafe",
+      "status": "success",
+      "toAddress": "REDACTED",
+      "tag": "",
+      "withdrawFee": "0.50000000",
+      "createTime": "1789999100000",
+      "updateTime": "1789999200000",
+      "withdrawId": "wd-1",
+      "withdrawType": 0
+    },
+    {
+      "coin": "BTC",
+      "chain": "BTC",
+      "amount": "0.10000000",
+      "txID": "0xonchainonly",
+      "status": "BlockchainConfirmed",
+      "withdrawFee": "0.00010000",
+      "createTime": "1789999100000",
+      "updateTime": "1789999210000",
+      "withdrawId": "wd-2"
+    },
+    {
+      "coin": "ETH",
+      "chain": "ETH",
+      "amount": "2.00000000",
+      "txID": "",
+      "status": "Reject",
+      "withdrawFee": "0",
+      "createTime": "1789999100000",
+      "updateTime": "1789999220000",
+      "withdrawId": "wd-3"
+    }
+  ],
+  "nextPageCursor": ""
+}
