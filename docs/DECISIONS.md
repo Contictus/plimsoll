@@ -965,6 +965,36 @@ waiting for.
 
 ---
 
+### K56 - A shock names its asset, and a missing requirement is not a small one · `active`
+A scenario is a statement about specific assets. "BTC minus twenty percent" must not move ETH:
+inventing a correlation the user did not ask for produces a number that looks like analysis and
+is a guess.
+
+The corollary matters more than the rule. A shock hits the spot holding and the perpetual
+**together**, because they are the same asset. A user long spot BTC and short BTC perp is
+hedged, and a scenario that moved only one leg reports a loss they do not have -- the same false
+alarm K13 exists to prevent, arriving through a different door.
+
+The second half of this decision is what happens when something is missing. An unpriced holding
+and an uncaptured bracket table are both absences, and they are handled differently on purpose,
+because they fail in opposite directions:
+
+| Missing | Effect | Treatment |
+|---|---|---|
+| a price for a holding | excluding it **understates** equity, overstating the danger | excluded, and named |
+| a bracket table for a position | summing only the requirements we know **understates** the requirement, overstating the buffer | the buffer is unavailable entirely |
+
+Partial answers are allowed where they are conservative and forbidden where they flatter. A
+projection that reported an account as safer than it is, at the moment it is being asked whether
+it is safe, is worse than no projection.
+
+Maintenance is recomputed from the venue's tier table at the shocked notional, never scaled from
+today's figure (F15). A shock large enough to be worth modelling is usually large enough to
+cross a tier, and scaling assumes a constant rate -- wrong, again, in the direction that
+understates the danger.
+
+---
+
 ## Deliberately Out of Scope
 
 | Not doing | Why |

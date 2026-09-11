@@ -51,3 +51,34 @@ export async function get<T>(path: string): Promise<T> {
   }
   return (await response.json()) as T;
 }
+
+/**
+ * post sends a body and reads the answer. Only one endpoint needs it: the scenario projection,
+ * which carries a body and therefore cannot be a GET (L13 -- it models and writes nothing).
+ *
+ * A 422 is returned as its own error rather than thrown as a failure, because "that move would
+ * take the price below zero" is an answer to the question, not a broken request, and the user
+ * has to be able to read it.
+ */
+export class Refused extends Error {}
+
+export async function post<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`/api${path}`, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.status === 401) {
+    throw new Unauthorized();
+  }
+  if (response.status === 422) {
+    const detail = (await response.json()) as { detail?: string };
+    throw new Refused(detail.detail ?? "that scenario cannot be projected");
+  }
+  if (!response.ok) {
+    throw new Error(`${path} answered ${response.status}`);
+  }
+  return (await response.json()) as T;
+}

@@ -74,11 +74,15 @@ WHERE s.account_id = sqlc.arg(account_id)
 ORDER BY s.integration_id;
 
 -- name: ListCollateralPositions :many
-SELECT p.integration_id, p.instrument_id, i.canonical_symbol,
+-- base_symbol is the asset the contract is ON, which is what a scenario shock names and what
+-- a spot holding of the same asset is keyed by. Without it a hedged book would be shocked on
+-- one leg only (K56).
+SELECT p.integration_id, p.instrument_id, i.canonical_symbol, b.canonical_symbol AS base_symbol,
        p.quantity, p.entry_price, p.mark_price, p.liquidation_price,
        p.notional, p.leverage, p.maint_margin
 FROM collateral_positions p
 JOIN instruments i ON i.id = p.instrument_id
+JOIN assets b ON b.id = i.base_asset_id
 WHERE p.account_id = sqlc.arg(account_id)
 ORDER BY p.integration_id, i.canonical_symbol;
 
@@ -88,3 +92,15 @@ SELECT integration_id, instrument_id, bracket, notional_floor, notional_cap,
 FROM leverage_brackets
 WHERE account_id = sqlc.arg(account_id) AND instrument_id = sqlc.arg(instrument_id)
 ORDER BY notional_floor;
+
+-- name: ListAccountLeverageBrackets :many
+-- Every bracket table this account has captured, in one read.
+--
+-- One read rather than one per position on purpose: a scenario touching twenty symbols would
+-- otherwise make twenty round trips inside one request, which is the shape that has already
+-- cost this project a connection-slot exhaustion once.
+SELECT integration_id, instrument_id, bracket, notional_floor, notional_cap,
+       maint_margin_ratio, cum
+FROM leverage_brackets
+WHERE account_id = sqlc.arg(account_id)
+ORDER BY instrument_id, notional_floor;
