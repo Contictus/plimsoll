@@ -6,6 +6,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/freshness"
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
+	"github.com/Contictus/plimsoll/backend/internal/quality"
 	"github.com/google/uuid"
 )
 
@@ -202,4 +203,52 @@ func FeePriceMissing(asset string, since time.Time) freshness.Reason {
 			" they are reported in %s and are not in any total", asset, asset),
 		Since: since,
 	}
+}
+
+// OpenFindings turns the data-quality register into the one reason a portfolio response owes
+// its reader (L11, K23).
+//
+// This is the producer freshness.ReasonReconciliationMismatch has been waiting for since M0:
+// the constant has existed, and until M7 nothing could raise it. A response built from a fold
+// the venue disagrees with is not a wrong response -- it is an unverified one, and the
+// difference is exactly what this says out loud.
+//
+// One reason for the whole register rather than one per finding: the response's job is to
+// tell the reader that the numbers are in doubt and where to look, not to reproduce the
+// register inside every payload. /data-quality is where the findings are.
+func OpenFindings(open []quality.Stored, now time.Time) []freshness.Reason {
+	worst, count, since := freshness.SeverityInfo, 0, time.Time{}
+	for _, f := range open {
+		if f.ClosedAt.Valid {
+			continue
+		}
+		count++
+		if since.IsZero() || f.OpenedAt.Before(since) {
+			since = f.OpenedAt
+		}
+		switch f.Severity {
+		case quality.SeverityError:
+			worst = freshness.SeverityError
+		case quality.SeverityWarn:
+			if worst == freshness.SeverityInfo {
+				worst = freshness.SeverityWarn
+			}
+		}
+	}
+	if count == 0 || worst == freshness.SeverityInfo {
+		return nil
+	}
+	if since.IsZero() {
+		since = now
+	}
+	return []freshness.Reason{{
+		Code:     freshness.ReasonReconciliationMismatch,
+		Severity: worst,
+		Detail: fmt.Sprintf(
+			"%d open data-quality finding(s); see GET /data-quality for what and since when",
+			count),
+		// Since is the OLDEST open finding, not the newest: the reason answers "how long has
+		// this been true", and the newest one understates it every time.
+		Since: since,
+	}}
 }

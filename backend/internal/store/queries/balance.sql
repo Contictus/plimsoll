@@ -49,3 +49,45 @@ WHERE account_id = sqlc.arg(account_id)
   AND fee IS NOT NULL AND fee <> 0
   AND fee_asset_id IS NULL
 ORDER BY integration_id;
+
+-- name: ListIntegrationBalancesWithSymbol :many
+-- One integration's asset fold, carrying the canonical symbol the venue's code resolves to.
+-- Reconciliation compares against this: the venue's own code is resolved through the alias
+-- table at the snapshot's instant and never used as a key itself (L8, K22).
+SELECT b.asset_id, a.canonical_symbol, b.quantity
+FROM asset_balances b
+JOIN assets a ON a.id = b.asset_id
+WHERE b.account_id = sqlc.arg(account_id)
+  AND b.integration_id = sqlc.arg(integration_id)
+ORDER BY a.canonical_symbol;
+
+-- name: SumUnattributedFeesByAsset :many
+-- How much of each asset left the account as a fee we could not attribute.
+--
+-- The fee was stored with its venue asset code but no asset id, because the code resolved to
+-- nothing (K22). Our balance for that asset is therefore HIGH by exactly this much -- which
+-- makes this the one piece of evidence that can classify such a gap as `unsupported` rather
+-- than as a missing event we cannot account for (K54).
+SELECT fee_asset, SUM(fee)::numeric(38,18) AS total
+FROM ledger_events
+WHERE account_id = sqlc.arg(account_id)
+  AND integration_id = sqlc.arg(integration_id)
+  AND fee IS NOT NULL AND fee <> 0
+  AND fee_asset_id IS NULL
+  AND fee_asset IS NOT NULL
+GROUP BY fee_asset
+ORDER BY fee_asset;
+
+-- name: ListVenueIdentitiesSeenTwice :many
+-- Venue event ids this account holds under more than one integration.
+--
+-- L5's dedup key is UNIQUE (integration_id, venue_event_id), so one trade cannot enter twice
+-- through one connection. It CAN enter twice through two -- the same sub-account connected
+-- under two integrations -- and that is the one way a position doubles without any single
+-- ingest path being wrong. It is therefore the only duplicate this classifier can prove.
+SELECT venue_event_id, count(DISTINCT integration_id) AS integrations
+FROM ledger_events
+WHERE account_id = sqlc.arg(account_id)
+GROUP BY venue_event_id
+HAVING count(DISTINCT integration_id) > 1
+ORDER BY venue_event_id;

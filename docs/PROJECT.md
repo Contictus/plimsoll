@@ -284,8 +284,8 @@ GET    /funding
 
 GET    /integrations                  POST /integrations/binance
 DELETE /integrations/{id}
-GET    /reconciliation
-GET    /data-quality                  open findings by severity (K14)
+GET    /data-quality                  open findings, worst first; ?history=true for closed
+POST   /integrations/{id}/resync      rewind the walk; never writes a correction (K55)
 GET    /assets                        canonical registry + alias resolution
 GET    /transfers                     ?unmatched=true
 POST   /transfers/{out}/link/{in}     manual transfer matching
@@ -352,7 +352,7 @@ Directories are created when the module is written, not in advance.
 | **M4** ✅ | Market data + valuation | `price_ticks` populating; one `valuation_run` per response; USD price paths recorded; `freshness` populated; `GET /portfolio?at=` working. `GET /pnl` and the lineage price paths shipped with it; `GET /portfolio/history` deliberately deferred (K48) |
 | **M5** ✅ | Perpetuals + collateral | USD-M perps in the registry (`PERPETUAL` + `TRADING` only), fills and funding normalized, the margin picture captured as one act and stored, `GET /risk` reporting equity, margin buffer, maintenance margin and per-position liquidation distance from one snapshot named in `as_of`, `GET /funding` summing payments per symbol from the ledger; a stale capture is served with `collateral_stale` and a missing one is `collateral_unavailable`, never a zero buffer; hedge mode refused (one-way only) |
 | **M6** ✅ | Strategy + risk + alerting | Strategy tags that survive a projection rebuild (K30); a risk engine reporting gross AND directional leverage, so a delta-neutral basis trade does not read as 2× (K13); `GET /exposure` agreeing with `/portfolio` on one run; alert rules with hysteresis and cooldown — twenty crossings, one alert — delivered to Telegram or a webhook and recorded either way; SSE over LISTEN/NOTIFY (K51); the USD-M history walk M5 left uncalled, and the live futures stream as its trigger (F17, F19, F20); dashboard v1 |
-| **M7** | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) + a resync action |
+| **M7** ✅ | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) decided from evidence rather than sign (K54); a register where a problem has a lifetime rather than a timestamp, so a disagreement lasting a day is one finding and not 288 (K53); `GET /data-quality`; a resync that rewinds the walk and writes no correction (K55); and `reconciliation_mismatch` — declared in M0 and never produced until now — reaching `/portfolio` from an open finding |
 | **M7.5** | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock |
 | **M8** | Bybit + cross-venue transfers | Two sources normalized correctly into one portfolio; withdrawals match deposits |
 
