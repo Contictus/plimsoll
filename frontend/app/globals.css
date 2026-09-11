@@ -1,0 +1,71 @@
+/* One stylesheet. The dashboard is five pages of numbers; a design system would be scaffolding
+   for a building that is one room. */
+:root {
+  --ink: #101418;
+  --muted: #5b6672;
+  --line: #e3e7eb;
+  --paper: #ffffff;
+  --ground: #f6f7f9;
+  --ok: #1a7f4b;
+  --warn: #b26a00;
+  --error: #b3261e;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+
+nav.top {
+  display: flex; gap: 16px; align-items: baseline;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--paper);
+}
+nav.top a { color: var(--muted); text-decoration: none; }
+nav.top a:hover { color: var(--ink); }
+nav.top .brand { font-weight: 650; color: var(--ink); margin-right: 8px; }
+
+h1 { font-size: 20px; margin: 24px 0 8px; }
+h2 { font-size: 16px; margin: 24px 0 8px; }
+
+.freshness { border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
+  background: var(--paper); padding: 10px 12px; margin: 16px 0; }
+.freshness header { display: flex; gap: 10px; align-items: baseline; }
+.freshness .as-of { color: var(--muted); font-size: 13px; }
+.freshness ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.freshness code { font-size: 12px; color: var(--ink); }
+.freshness-ok { border-left-color: var(--ok); }
+.freshness-degraded { border-left-color: var(--warn); }
+.freshness-unreliable { border-left-color: var(--error); }
+.severity-error { color: var(--error); }
+.severity-warn { color: var(--warn); }
+
+table { width: 100%; border-collapse: collapse; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+td.negative { color: var(--error); }
+td.unknown { color: var(--muted); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.card .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.card .value { font-size: 22px; font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 4px; }
+.card .value.negative { color: var(--error); }
+.card .value.unknown { color: var(--muted); }
+
+form.login { max-width: 360px; display: grid; gap: 10px; }
+input, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+button { background: var(--ink); color: var(--paper); border-color: var(--ink); cursor: pointer; }
+p.error { color: var(--error); }
+p.empty { color: var(--muted); }

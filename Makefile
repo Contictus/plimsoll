@@ -22,7 +22,7 @@ endif
 BACKEND := backend
 COMPOSE := docker compose -f deploy/compose.yaml --env-file .env
 
-.PHONY: test-integration-v help generate migrate migrate-down test test-integration lint docs-check up down psql smoke
+.PHONY: test-integration-v help generate migrate migrate-down test test-integration lint docs-check up down psql smoke frontend-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -45,6 +45,9 @@ test-integration: ## //go:build integration — real Postgres via compose
 
 lint: ## golangci-lint
 	cd $(BACKEND) && go tool golangci-lint run
+
+frontend-check: ## dashboard: types, the no-float-parsing guard (L1), and the money tests
+	cd frontend && npm run check
 
 docs-check: ## CLAUDE.md must be byte-identical to AGENTS.md
 	@diff -u CLAUDE.md AGENTS.md && echo "docs-check: OK"

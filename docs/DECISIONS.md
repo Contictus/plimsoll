@@ -877,6 +877,31 @@ re-reads through the authenticated endpoint. Pushing the numbers down the channe
 second, unversioned copy of the API contract on the wire -- one that no `freshness` envelope
 travels with, and a second place for a tenancy mistake to live.
 
+### K52 - The dashboard parses no number · `extends L1`
+
+Every amount the API sends is a string, and the dashboard keeps it one: grouping, trimming and
+percentages are string edits, and there is no `parseFloat`, `Number()` or `toFixed` anywhere in
+the tree. A script in `make frontend-check` fails the build if one appears.
+
+The reason is that JavaScript has no other number. `NUMERIC(38,18)` holds more than a float64
+can, so `12345678901234567890.123456789012345678` comes back as `1.2345678901234568e+19` --
+right in the database, wrong on the screen, and wrong in the direction nobody checks. The whole
+backend is built to keep those digits; losing them in the last thirty pixels would undo it.
+
+**Absent and zero render differently.** The API sends `""` for a number it could not compute --
+an unpriced position, a margin buffer with no capture behind it -- and the dashboard renders a
+dash. Rendering `0` there would make the opposite claim to the one the response is making, which
+is K50's rule arriving at the last layer that can break it.
+
+**The freshness banner is the first component, not the last.** Every page renders it above the
+numbers, structurally: the page component takes the endpoint and renders the envelope before it
+renders anything the envelope qualifies. Bolting it on afterwards is how a dashboard ends up
+with totals on three screens and qualification on two.
+
+**There is no authentication code.** The session cookie is HttpOnly and same-origin (K16, K27),
+so the browser attaches it and a script cannot read it. A 401 is the only thing this side can
+observe about a session, and the answer to one is the login form.
+
 ---
 
 ## Deliberately Out of Scope
