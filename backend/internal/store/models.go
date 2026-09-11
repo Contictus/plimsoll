@@ -141,6 +141,22 @@ type CollateralSnapshot struct {
 	AvailableBalance  decimal.Decimal
 }
 
+type Finding struct {
+	ID            uuid.UUID
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+	Kind          string
+	Subject       string
+	Severity      string
+	Detail        string
+	Delta         decimal.NullDecimal
+	Raw           []byte
+	OpenedAt      time.Time
+	LastSeenAt    time.Time
+	ClosedAt      *time.Time
+	Occurrences   int32
+}
+
 type Instrument struct {
 	ID              int64
 	CanonicalSymbol string
