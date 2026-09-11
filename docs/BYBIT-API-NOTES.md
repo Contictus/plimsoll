@@ -14,6 +14,7 @@ Binance findings (F1–F21).
 | Deposit records | <https://bybit-exchange.github.io/docs/v5/asset/deposit/deposit-record> |
 | Withdrawal records | <https://bybit-exchange.github.io/docs/v5/asset/withdraw/withdraw-record> |
 | Status enums | <https://bybit-exchange.github.io/docs/v5/enum> |
+| API key permissions | <https://bybit-exchange.github.io/docs/v5/user/apikey-info> |
 
 ---
 
@@ -128,14 +129,50 @@ walk overlaps its windows by one second rather than assuming which way it rounds
 
 ---
 
+## B5 — the key says whether it is read-only, in one field
+
+`GET /v5/user/query-api`, read 2026-09-11 from
+<https://bybit-exchange.github.io/docs/v5/user/apikey-info>. Documented as accessible "with
+any permission", so a read-only key can ask about itself.
+
+The decisive field:
+
+```
+readOnly   0 = read/write   1 = read-only
+```
+
+and beside it a `permissions` object of named arrays:
+
+```
+ContractTrade: ["Order", "Position"]      Spot:    ["SpotTrade"]
+Wallet:        ["AccountTransfer", "SubMemberTransfer", "Withdraw"]
+Options:       ["OptionsTrade"]           Derivatives: ["DerivativesTrade"]
+Exchange:      ["ExchangeHistory"]        Earn, FiatP2P, Affiliate, BlockTrade, ...
+```
+
+**This is cleaner than Binance's, and the difference is worth naming.** F8 had to infer
+read-only status from a set of booleans whose meanings the page never states; here the venue
+says it outright. A key is accepted only when `readOnly == 1` **and** every permission string
+it holds is on a closed allowlist -- two independent checks, either of which rejects, because
+`readOnly` is the venue's promise and the allowlist is ours (K9, L13).
+
+The allowlist is closed rather than a denylist for the same reason Binance's is: a venue that
+adds a permission would have it accepted by default, and a permission we have never heard of
+is rejected until someone decides otherwise.
+
+**Still unverified:** whether reading deposit and withdrawal records *requires* a granted
+permission at all, or whether `readOnly` alone suffices. The page for those endpoints states
+no permission. A key that turns out to need one fails loudly at the first call with the
+venue's own error, which is the right failure -- the alternative is inferring a permission
+model and being wrong quietly.
+
+---
+
 ## Unverified, and therefore not built
 
 - **The rate limit for these two endpoints.** The pages do not state one. The shared limiter
   (K24) governs them at the IP level either way, but the per-endpoint cost is unknown, so the
   walk is paced conservatively rather than tuned.
-- **Whether a read-only key can reach them at all**, and what a Bybit key's permission model
-  calls the read-only scope. Binance's equivalent took a dedicated endpoint and a finding of
-  its own (F8); the same verification is owed here and has not been done.
 - **Everything about Bybit trades, positions and funding.** M8 covers transfers across venues,
   not a second full ingest. A Bybit portfolio is a later milestone, and pretending otherwise by
   half-building it is how a venue ends up with a normalizer nothing calls (K38, twice).

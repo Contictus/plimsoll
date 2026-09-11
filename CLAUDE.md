@@ -139,9 +139,12 @@ code runs; it does not prove the code is correct.
 - **Fixtures before network.** Record real exchange payloads into
   `testdata/fixtures/binance/` (redacted), then develop against the fixture. Never
   iterate against the live API.
-- **Verify Binance details against the official docs** — symbol requirements, `listenKey`
-  lifetime, `positionRisk` version, weight costs, rate-limit headers. Never from memory,
-  never from a blog post. Getting this wrong produces plausible, wrong numbers.
+- **Verify venue details against the official docs** — symbol requirements, `listenKey`
+  lifetime, `positionRisk` version, weight costs, rate-limit headers, a signature payload,
+  a status enum. Never from memory, never from a blog post. Getting this wrong produces
+  plausible, wrong numbers. Findings are numbered and dated: **F1–F21** for Binance,
+  **B1–B5** for Bybit, and a fact that could not be verified is written down as unverified
+  rather than guessed at.
 - **Milestone M1 ships before any network code.** Debugging the engine against live data
   is the most expensive path available.
 
@@ -245,6 +248,7 @@ backend/
     crypto/        envelope encryption: per-account DEK behind a KEK      (K25)
     integration/   exchange connections and their stored credentials      (K25)
     exchange/binance/   rest · ws · normalizer · fixtures
+    exchange/bybit/     rest · normalizer · fixtures; transfers only, by decision (M8)
     ratelimit/     two-tier: per-integration weight + shared per-IP       (K24)
     backfill/      resumable per-scope history walk                       (K26, K33)
     asset/         canonical asset registry, time-scoped alias resolution (K10, K22)
@@ -272,6 +276,7 @@ backend/
     obs/           slog with secret redaction + OTel                      (L13)
     store/         sqlc output and the pool constructor
   testdata/fixtures/binance/   recorded, redacted real payloads
+  testdata/fixtures/bybit/     the same; `documented` until a key exists
 frontend/          Next.js dashboard: portfolio, risk, exposure, alerts     (K27)
 deploy/            compose topology, Caddyfile, postgres init
 ```
@@ -280,10 +285,10 @@ deploy/            compose topology, Caddyfile, postgres init
 A directory is created when its module is, never in advance — so when the next one is decided
 it is named here first, and work that belongs in it is not quietly absorbed by a neighbour.
 
-The one thing still outstanding is not a directory. `exchange/bybit/` holds the venue's
-verified facts (`docs/BYBIT-API-NOTES.md`, B1–B4) and no client: M8 matched the two halves of
-a cross-venue movement, and a second full ingest is a later milestone. Half-building one is how
-a venue ends up with a normalizer nothing calls (K38, twice).
+`exchange/bybit/` is deliberately partial, and the line is drawn rather than drifted to: it
+covers deposits and withdrawals, which is what cross-venue matching needs, and **not** trades,
+positions or funding. A Bybit portfolio is a later milestone. Everything it does encode is
+verified in `docs/BYBIT-API-NOTES.md` (B1–B5) and dated; nothing is remembered.
 
 ---
 

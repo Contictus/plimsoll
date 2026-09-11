@@ -1,0 +1,52 @@
+{
+  "_source": "documented",
+  "_why": "GET /v5/asset/deposit/query-record. The `result` object only; the envelope is the client's business. Four rows, chosen to cover the four cases the enum makes different: settled, settled-after-a-rollback-review (70012), rolled back (70011), and still processing.",
+  "rows": [
+    {
+      "coin": "USDT",
+      "chain": "TRX",
+      "amount": "500.00000000",
+      "txID": "0xdeadbeefcafe",
+      "status": 3,
+      "toAddress": "REDACTED",
+      "tag": "",
+      "depositFee": "0",
+      "successAt": "1789999200000",
+      "confirmations": "20",
+      "txIndex": "0",
+      "blockHash": "REDACTED",
+      "batchReleaseLimit": "-1",
+      "depositType": "0",
+      "fromAddress": "",
+      "id": "dep-1"
+    },
+    {
+      "coin": "USDT",
+      "chain": "TRX",
+      "amount": "125.50000000",
+      "txID": "0xrollbackreviewed",
+      "status": 70012,
+      "successAt": "1789999260000",
+      "id": "dep-2"
+    },
+    {
+      "coin": "USDT",
+      "chain": "TRX",
+      "amount": "9999.00000000",
+      "txID": "0xrolledback",
+      "status": 70011,
+      "successAt": "1789999320000",
+      "id": "dep-3"
+    },
+    {
+      "coin": "BTC",
+      "chain": "BTC",
+      "amount": "0.05000000",
+      "txID": "0xstillgoing",
+      "status": 2,
+      "successAt": "1789999380000",
+      "id": "dep-4"
+    }
+  ],
+  "nextPageCursor": "eyJtaW5JRCI6MSwibWF4SUQiOjR9"
+}

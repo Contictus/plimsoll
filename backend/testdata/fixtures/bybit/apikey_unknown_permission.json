@@ -1,0 +1,11 @@
+{
+  "_source": "derived",
+  "_why": "A permission string this code has never heard of. The allowlist is closed, so it is refused rather than accepted by default -- a venue that adds a capability must not have it granted silently.",
+  "readOnly": 1,
+  "type": 1,
+  "permissions": {
+    "Exchange": ["ExchangeHistory"],
+    "SomethingNew": ["DoAnything"]
+  },
+  "ips": ["*"]
+}

@@ -35,6 +35,15 @@ const (
 	ScopeDiscover = "discover"
 	ScopeDeposits = "deposits"
 
+	// ScopeWithdrawals is the outbound half. The name has been reserved in the schema since
+	// migration 00013 and nothing walked it until M8, because Binance publishes neither the
+	// status enum nor the timezone its withdrawal history would need (F5). Bybit publishes
+	// both (B2), so the scope finally has a walker -- on that venue, and not on the other.
+	//
+	// A scope name is unique per INTEGRATION, so "withdrawals" under a Bybit connection and
+	// "deposits" under a Binance one are different rows and never collide.
+	ScopeWithdrawals = "withdrawals"
+
 	scopeTradesPrefix = "trades:"
 
 	// One scope per transfer direction, because the endpoint takes the direction as a
@@ -148,8 +157,17 @@ type Progress struct {
 // Status reads one scope's progress. A scope that has never been written is not an error:
 // it is a walk that has not started, and the zero Progress says so.
 func Status(ctx context.Context, d Deps, t Target, scope string) (Progress, error) {
+	return statusFor(ctx, d.DB, t, scope)
+}
+
+// statusFor is Status without the Deps. A second venue's walk needs the cursor and not the
+// Binance client that Deps also carries, and threading a half-populated Deps through it
+// would make the unused half look load-bearing.
+func statusFor(
+	ctx context.Context, db tenancy.Beginner, t Target, scope string,
+) (Progress, error) {
 	var p Progress
-	err := tenancy.InTx(ctx, d.DB, t.AccountID, func(q *store.Queries) error {
+	err := tenancy.InTx(ctx, db, t.AccountID, func(q *store.Queries) error {
 		row, err := q.GetBackfillProgress(ctx, store.GetBackfillProgressParams{
 			AccountID: t.AccountID, IntegrationID: t.IntegrationID, Scope: scope,
 		})
@@ -194,7 +212,16 @@ func Scopes(ctx context.Context, d Deps, t Target, prefix string) ([]Progress, e
 // that describes them, in a single transaction. Passing no events is normal -- a window
 // with nothing in it still advances the cursor, and a completed walk records only that.
 func commit(ctx context.Context, d Deps, t Target, events []ledger.Event, p Progress) error {
-	return tenancy.InTx(ctx, d.DB, t.AccountID, func(q *store.Queries) error {
+	return commitTo(ctx, d.DB, t, events, p)
+}
+
+// commitTo is commit without the Deps, for the same reason statusFor exists. The events and
+// the cursor go in ONE transaction either way: a crash between them would lose events (cursor
+// first) or replay them forever (events first).
+func commitTo(
+	ctx context.Context, db tenancy.Beginner, t Target, events []ledger.Event, p Progress,
+) error {
+	return tenancy.InTx(ctx, db, t.AccountID, func(q *store.Queries) error {
 		if _, err := ledger.Append(ctx, q, events); err != nil {
 			return err
 		}

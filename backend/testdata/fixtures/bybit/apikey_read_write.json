@@ -1,0 +1,13 @@
+{
+  "_source": "derived",
+  "_why": "readOnly=0 with nothing listed under permissions. The venue says the key can write; the allowlist alone would have accepted it, which is why both checks exist (B5).",
+  "readOnly": 0,
+  "type": 1,
+  "permissions": {
+    "ContractTrade": [],
+    "Spot": [],
+    "Wallet": [],
+    "Exchange": []
+  },
+  "ips": ["*"]
+}

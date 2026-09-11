@@ -56,8 +56,13 @@ type deps struct {
 	// a stream pointed at it connects successfully and receives nothing.
 	futuresWsURL string
 	wsURL        string
-	ownerID      string
-	log          *slog.Logger
+
+	// bybitURL is the second venue's host. Its own variable rather than a reuse of restURL,
+	// because they are different hosts with different paths and different signature schemes
+	// (B1) -- and because a test stack points both at one recorder.
+	bybitURL string
+	ownerID  string
+	log      *slog.Logger
 }
 
 // supervise runs one integration for as long as the process lives, claiming it whenever it

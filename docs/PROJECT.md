@@ -356,32 +356,36 @@ Directories are created when the module is written, not in advance.
 | **M6** ✅ | Strategy + risk + alerting | Strategy tags that survive a projection rebuild (K30); a risk engine reporting gross AND directional leverage, so a delta-neutral basis trade does not read as 2× (K13); `GET /exposure` agreeing with `/portfolio` on one run; alert rules with hysteresis and cooldown — twenty crossings, one alert — delivered to Telegram or a webhook and recorded either way; SSE over LISTEN/NOTIFY (K51); the USD-M history walk M5 left uncalled, and the live futures stream as its trigger (F17, F19, F20); dashboard v1 |
 | **M7** ✅ | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) decided from evidence rather than sign (K54); a register where a problem has a lifetime rather than a timestamp, so a disagreement lasting a day is one finding and not 288 (K53); `GET /data-quality`; a resync that rewinds the walk and writes no correction (K55); and `reconciliation_mismatch` — declared in M0 and never produced until now — reaching `/portfolio` from an open finding |
 | **M7.5** ✅ | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock. A shock names its asset and the unshocked hold still, so a hedged book is shown on both legs and no correlation is invented (K56); maintenance is recomputed from the venue's tier table at the shocked notional rather than scaled, because a shock worth modelling usually crosses a tier (F15); an uncaptured bracket table makes the buffer unavailable rather than larger |
-| **M8** 🟡 | Bybit + cross-venue transfers | **Cross-venue matching is done and proven**: a withdrawal under one integration and a deposit under another are joined by txid (proof) or by amount and time (a guess, marked as such), one-to-one, with ambiguity refused rather than broken; a leg with no other half becomes a data-quality finding naming what it is mistaken for; `GET/POST /transfers` and a manual join the user can undo. **Bybit ingest is not built** — its facts are verified (B1–B4) and its client is not written; see below |
+| **M8** ✅ | Bybit + cross-venue transfers | Two sources into one ledger: a signed Bybit V5 client (B1), both history walks with the venue's own 30-day windows and cursor paging (B3), and normalizers over the two status enums Bybit publishes and Binance does not (B2). A withdrawal under one integration and a deposit under another are joined by txid (proof) or by amount and time (a guess, marked), one-to-one, with ambiguity refused; a leg with no other half becomes a data-quality finding naming what it is mistaken for; `GET/POST /transfers` and a manual join the user can undo (K57). **Not built, by decision:** Bybit trades, positions and funding — a Bybit portfolio is a later milestone |
 
-**M8 is half shipped, and the half that is missing is named.** Cross-venue matching is
-complete and proven against a real Postgres: two legs are joined, the ledger is byte-identical
-either side of the match, a re-run produces the same links rather than a duplicate-key error,
-and an unmatched leg becomes a finding that says what it is mistaken for. The matcher is pure
-and mutation-tested; nine mutations, no survivors.
+**M8 is shipped, with its boundary drawn rather than drifted to.** Cross-venue matching is
+proven against a real Postgres: two legs are joined, the ledger is byte-identical either side
+of the match, a re-run produces the same links rather than a duplicate-key error, and an
+unmatched leg becomes a finding that says what it is mistaken for. The Bybit adapter walks
+both histories, resumes, pages by cursor, and refuses any status outside the published enum.
 
-Bybit ingest is **not built**, and that is a decision rather than an omission:
+**B2 is the finding that shaped the milestone.** Bybit publishes the deposit and withdrawal
+status enums; Binance publishes neither (F5, re-checked 2026-09-11 and still the garbled
+fragment `0(0 Sent, 2 Approval 3 4 6)`). So `NormalizeBybitWithdrawal` exists and its Binance
+counterpart still does not. An account moving coins from Binance to Bybit therefore produces a
+deposit with no withdrawal to match -- a documentation gap, not a matcher failure, and K57
+makes it a visible finding rather than silence.
 
-- Its facts are verified and written down (`BYBIT-API-NOTES.md`, B1-B4): the signature scheme,
-  both endpoints, both status enums, the window and page limits. Nothing there is remembered.
-- **B2 is the finding that shaped the milestone.** Bybit publishes the deposit and withdrawal
-  status enums; Binance publishes neither (F5, re-checked 2026-09-11 and still the garbled
-  fragment `0(0 Sent, 2 Approval 3 4 6)`). So a Bybit withdrawal could be normalized where a
-  Binance one still cannot -- which means an account moving coins from Binance to Bybit
-  produces a deposit with no withdrawal to match. That is a documentation gap, not a matcher
-  failure, and K57 makes it a visible finding rather than silence.
-- What is **not** verified is whether a read-only Bybit key can reach those endpoints at all,
-  and what Bybit's permission model calls that scope. Binance's equivalent needed a dedicated
-  endpoint and a finding of its own (F8); the same verification is owed here and cannot be done
-  without a key.
+**B5 made the key check better than Binance's.** `GET /v5/user/query-api` states `readOnly`
+outright, where F8 had to infer it from booleans the page never defines. A key is accepted only
+when the venue says read-only **and** every permission it holds is on a closed allowlist -- two
+independent checks, because one is the venue's promise and the other is ours (K9, L13).
 
-Writing a second venue's client against unverified permissions, with no key to record a fixture
-from, is how a venue ends up with a normalizer nothing calls -- which this project has now done
-twice (K38, and again in M5's futures walk). The client waits for the same key M2 waits for.
+**What Bybit does not do here, deliberately:** trades, positions, funding. M8 connects the
+venue for the half that feeds cross-venue matching. Half-building a second full ingest is how a
+venue ends up with a normalizer nothing calls, which this project has done twice (K38, and
+again in M5's futures walk) -- so the walks written here are wired into the worker in the same
+commit that adds them.
+
+**Still unverified, and therefore not assumed:** whether reading the two history endpoints
+requires a granted permission at all, or whether `readOnly` alone suffices. The pages state
+none. A key that needs one fails loudly at the first call with the venue's own error, which is
+the right failure; inferring a permission model would be the wrong one.
 
 **M2 is code complete and not shipped.** Every piece is written and tested against
 recorded and documented fixtures: the signed REST client, the normalizer, the resumable

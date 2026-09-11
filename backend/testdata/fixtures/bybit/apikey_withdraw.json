@@ -1,0 +1,13 @@
+{
+  "_source": "derived",
+  "_why": "The key K9 exists to refuse: it can move money off the exchange. Derived from the read-only example by granting Wallet.Withdraw, which no real account will hand over on demand.",
+  "readOnly": 1,
+  "type": 1,
+  "permissions": {
+    "ContractTrade": [],
+    "Spot": [],
+    "Wallet": ["Withdraw"],
+    "Exchange": ["ExchangeHistory"]
+  },
+  "ips": ["*"]
+}

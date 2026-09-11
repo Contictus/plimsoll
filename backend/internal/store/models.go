@@ -347,4 +347,5 @@ type WorkerIntegration struct {
 	IntegrationID uuid.UUID
 	AccountID     uuid.UUID
 	Runnable      bool
+	Exchange      string
 }

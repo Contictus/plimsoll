@@ -113,7 +113,7 @@ func (q *Queries) SetIntegrationCredential(ctx context.Context, arg SetIntegrati
 }
 
 const workerActiveIntegrations = `-- name: WorkerActiveIntegrations :many
-SELECT integration_id, account_id, runnable FROM worker_active_integrations()
+SELECT integration_id, account_id, runnable, exchange FROM worker_active_integrations()
 `
 
 // The worker's only cross-account read, through the SECURITY DEFINER surface in 00015.
@@ -127,7 +127,12 @@ func (q *Queries) WorkerActiveIntegrations(ctx context.Context) ([]WorkerIntegra
 	items := []WorkerIntegration{}
 	for rows.Next() {
 		var i WorkerIntegration
-		if err := rows.Scan(&i.IntegrationID, &i.AccountID, &i.Runnable); err != nil {
+		if err := rows.Scan(
+			&i.IntegrationID,
+			&i.AccountID,
+			&i.Runnable,
+			&i.Exchange,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

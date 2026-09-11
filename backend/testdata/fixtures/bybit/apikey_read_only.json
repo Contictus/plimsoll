@@ -1,0 +1,24 @@
+{
+  "_source": "documented",
+  "_why": "A key that passes: readOnly=1 and nothing granted beyond reading history.",
+  "id": "0",
+  "note": "plimsoll",
+  "apiKey": "REDACTED",
+  "readOnly": 1,
+  "type": 1,
+  "permissions": {
+    "ContractTrade": [],
+    "Spot": [],
+    "Wallet": [],
+    "Options": [],
+    "Derivatives": [],
+    "Exchange": ["ExchangeHistory"],
+    "CopyTrading": [],
+    "BlockTrade": [],
+    "NFT": [],
+    "Affiliate": []
+  },
+  "ips": ["*"],
+  "vipLevel": "No VIP",
+  "isMaster": true
+}
