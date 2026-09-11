@@ -719,3 +719,44 @@ anything reading a WebSocket frame from this venue: **decode short keys through 
   rather than as a position of zero.
 - The `ACCOUNT_UPDATE` payload's field names and its event-reason field. The stream is M5's
   live half; the REST snapshot above is enough to build and test the fold without it.
+
+---
+
+## 9. Reconciliation (M7)
+
+Source: <https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints>
+Fetched 2026-09-11, rendered.
+
+### F21 — the spot account answers with its own instant, and the holding is `free + locked`
+
+`GET /api/v3/account` — **IP weight 20**, signed. The response carries:
+
+```json
+{
+  "updateTime": 123456789,
+  "accountType": "SPOT",
+  "balances": [ { "asset": "BTC", "free": "4723846.89208129", "locked": "0.00000000" } ],
+  "permissions": ["SPOT"]
+}
+```
+
+Two consequences, both structural rather than cosmetic:
+
+1. **The holding is `free + locked`.** Comparing our fold against `free` alone would report
+   every open order as a missing event — the balance sitting behind a resting limit order is
+   held, not gone. This is the easiest available way to make reconciliation useless, and it
+   fails in exactly the direction that looks like a real bug.
+
+2. **`updateTime` is the exchange's own instant.** It means the snapshot does not have to be
+   timestamped with our clock, and the difference between the two *is* the clock-skew check
+   K14 asks for — obtained from a call we were making anyway, at no extra weight.
+
+Weight 20 is the constraint on cadence. At one integration reconciling every five minutes
+that is 240 weight an hour against a 6,000/minute IP budget (§3) — negligible; at 200
+integrations on one IP it is not, which is why reconciliation runs at its own priority band
+below realtime (`ARCHITECTURE.md` §7) rather than as fast as it can.
+
+**Still unverified, and deferred rather than guessed:** whether `balances` omits zero
+balances or includes them. Both readings are handled — an asset absent from their side and
+an asset present at zero are treated identically — so the answer changes nothing, which is
+why it is not worth a key to settle.

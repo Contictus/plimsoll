@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K52). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K55). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -227,7 +227,7 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K52 decision register
+  DECISIONS.md             K1–K55 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes

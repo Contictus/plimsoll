@@ -904,6 +904,67 @@ observe about a session, and the answer to one is the login form.
 
 ---
 
+### K53 - A finding has a lifetime, not a timestamp · `active`
+Reconciliation runs every five minutes. A balance that is wrong all day is **one** problem.
+If each run inserted a row, the register would grow by 288 rows a day per subject, and the
+one question the user actually asks -- *is it still wrong?* -- would become a query over
+history.
+
+So a finding has identity `(account_id, integration_id, kind, subject)` and a lifetime: a
+run **opens** what it newly sees, **touches** what it still sees, and **closes** what it no
+longer sees. A partial unique index enforces the identity only `WHERE closed_at IS NULL`, so
+a problem that returns after closing is a new finding rather than a resurrection -- "wrong
+for an hour, right for a day, wrong again" is two incidents, and reporting it as one loses
+the recovery in between.
+
+This is deliberately the same shape as K49's alert hysteresis, because it is the same
+failure: a repeating condition must not become a repeating record.
+
+The register is UPDATEd, and that is allowed: it is a projection, not the ledger (L2, L3).
+Drop it and the next run rebuilds it. Nothing may DELETE from it -- a finding closes, it does
+not vanish, because the history of a finding is the evidence for the classification.
+
+---
+
+### K54 - Tolerance is per metric, and the classifier uses evidence rather than sign · `active`
+One epsilon cannot serve both a quantity in BTC and a value in USD: pick a number small
+enough for USD and every dust balance is a finding; pick one large enough for BTC dust and a
+$400 discrepancy is invisible. Tolerance is therefore per metric -- quantity against a
+per-asset dust threshold, value against a basis-point band.
+
+The classifier is the harder half. The obvious mapping -- *they have more than us, so we are
+missing an event; we have more than them, so we counted one twice* -- **is wrong**, because
+"we have more than them" is equally explained by a withdrawal we never ingested (and
+`NormalizeWithdrawal` deliberately does not exist, F5). Sign alone decides nothing.
+
+Three classes are decided from evidence, and the fourth is the honest residual:
+
+| Class | Decided by |
+|---|---|
+| `rounding` | the delta is smaller than one step of the subject's own precision |
+| `unsupported` | our ledger holds a record for this subject that we deliberately do not normalize, large enough to explain the delta |
+| `duplicate` | two events with the same venue identity under different integrations -- the one way L5's dedup key can still let a trade in twice |
+| `missing_event` | **residual**: outside tolerance, and nothing above explains it |
+
+`missing_event` as the residual is correct rather than lazy. It is the class that means *we
+cannot account for this*, which is precisely what the user needs to be told.
+
+---
+
+### K55 - Resync re-runs the walk; it never writes a correction · `active`
+V1 policy is detect and report, never auto-correct. "A resync action" must not be read as
+automatic repair. Resync re-opens a backfill scope's cursor so the history walk runs again;
+anything genuinely missing is appended by the ordinary ingest path under the ordinary dedup
+key, and anything already present is deduplicated away (L5, K26).
+
+It writes no correction event and touches no `ledger_events` row (L2). Auto-correcting a
+**misclassified** finding writes a wrong correction into an append-only ledger, and that
+cannot be undone. Automatic correction waits for V2, and only after K54's classification has
+been validated against a real account -- which is one more thing riding on the key M2 is
+waiting for.
+
+---
+
 ## Deliberately Out of Scope
 
 | Not doing | Why |
