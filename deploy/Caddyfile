@@ -22,7 +22,10 @@
 		reverse_proxy api:8000
 	}
 
+	# Everything that is not /api is the dashboard. Same origin, so the session cookie the API
+	# set is sent with every /api request the browser makes and is reachable from no script
+	# (K27) -- which is the whole of this project's client-side auth story.
 	handle {
-		respond "plimsoll: the dashboard arrives in M3" 200
+		reverse_proxy frontend:3000
 	}
 }

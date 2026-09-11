@@ -36,4 +36,10 @@ grep -q 'plimsoll-api' <<<"$services" || {
 echo "--- worker is running ---"
 $COMPOSE ps worker | grep -Eq 'running|Up'
 
+echo "--- the dashboard answers through caddy ---"
+# The login page, because it is the one screen that renders without a session -- and a page
+# that renders is the whole of what this check claims. What is on it is the frontend's own
+# tests' business.
+curl -fsS http://localhost:8080/login | grep -q "Sign in"
+
 echo "SMOKE: OK"

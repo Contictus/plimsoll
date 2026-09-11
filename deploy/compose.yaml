@@ -104,6 +104,19 @@ services:
       jaeger:
         condition: service_healthy
 
+  # The dashboard (K27). It serves pages and never talks to Postgres: every number on every
+  # screen arrives through /api, which is what keeps one description of the data and one place
+  # where tenancy is decided.
+  frontend:
+    build:
+      context: ../frontend
+    environment:
+      NODE_ENV: production
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     volumes:
