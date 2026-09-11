@@ -162,12 +162,64 @@ func (q *Queries) ListAccountCollateral(ctx context.Context, accountID uuid.UUID
 	return items, nil
 }
 
+const listAccountLeverageBrackets = `-- name: ListAccountLeverageBrackets :many
+SELECT integration_id, instrument_id, bracket, notional_floor, notional_cap,
+       maint_margin_ratio, cum
+FROM leverage_brackets
+WHERE account_id = $1
+ORDER BY instrument_id, notional_floor
+`
+
+type ListAccountLeverageBracketsRow struct {
+	IntegrationID    uuid.UUID
+	InstrumentID     int64
+	Bracket          int32
+	NotionalFloor    decimal.Decimal
+	NotionalCap      decimal.Decimal
+	MaintMarginRatio decimal.Decimal
+	Cum              decimal.Decimal
+}
+
+// Every bracket table this account has captured, in one read.
+//
+// One read rather than one per position on purpose: a scenario touching twenty symbols would
+// otherwise make twenty round trips inside one request, which is the shape that has already
+// cost this project a connection-slot exhaustion once.
+func (q *Queries) ListAccountLeverageBrackets(ctx context.Context, accountID uuid.UUID) ([]ListAccountLeverageBracketsRow, error) {
+	rows, err := q.db.Query(ctx, listAccountLeverageBrackets, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountLeverageBracketsRow{}
+	for rows.Next() {
+		var i ListAccountLeverageBracketsRow
+		if err := rows.Scan(
+			&i.IntegrationID,
+			&i.InstrumentID,
+			&i.Bracket,
+			&i.NotionalFloor,
+			&i.NotionalCap,
+			&i.MaintMarginRatio,
+			&i.Cum,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollateralPositions = `-- name: ListCollateralPositions :many
-SELECT p.integration_id, p.instrument_id, i.canonical_symbol,
+SELECT p.integration_id, p.instrument_id, i.canonical_symbol, b.canonical_symbol AS base_symbol,
        p.quantity, p.entry_price, p.mark_price, p.liquidation_price,
        p.notional, p.leverage, p.maint_margin
 FROM collateral_positions p
 JOIN instruments i ON i.id = p.instrument_id
+JOIN assets b ON b.id = i.base_asset_id
 WHERE p.account_id = $1
 ORDER BY p.integration_id, i.canonical_symbol
 `
@@ -176,6 +228,7 @@ type ListCollateralPositionsRow struct {
 	IntegrationID    uuid.UUID
 	InstrumentID     int64
 	CanonicalSymbol  string
+	BaseSymbol       string
 	Quantity         decimal.Decimal
 	EntryPrice       decimal.Decimal
 	MarkPrice        decimal.Decimal
@@ -185,6 +238,9 @@ type ListCollateralPositionsRow struct {
 	MaintMargin      decimal.Decimal
 }
 
+// base_symbol is the asset the contract is ON, which is what a scenario shock names and what
+// a spot holding of the same asset is keyed by. Without it a hedged book would be shocked on
+// one leg only (K56).
 func (q *Queries) ListCollateralPositions(ctx context.Context, accountID uuid.UUID) ([]ListCollateralPositionsRow, error) {
 	rows, err := q.db.Query(ctx, listCollateralPositions, accountID)
 	if err != nil {
@@ -198,6 +254,7 @@ func (q *Queries) ListCollateralPositions(ctx context.Context, accountID uuid.UU
 			&i.IntegrationID,
 			&i.InstrumentID,
 			&i.CanonicalSymbol,
+			&i.BaseSymbol,
 			&i.Quantity,
 			&i.EntryPrice,
 			&i.MarkPrice,

@@ -51,4 +51,9 @@ test "$code" = "401"
 echo "--- the register has a page ---"
 curl -fsS http://localhost:8080/quality | grep -q "Data quality"
 
+echo "--- the scenario projection refuses without a session ---"
+# It reads an account's whole margin picture to answer. A 200 here would hand that to anyone.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST   -H 'content-type: application/json' -d '{"shocks":{"BTC":"-0.2"}}'   http://localhost:8080/api/risk/scenario)
+test "$code" = "401"
+
 echo "SMOKE: OK"

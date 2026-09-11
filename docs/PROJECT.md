@@ -278,7 +278,7 @@ GET    /positions/{id}/lineage        events + prices that produced this number
 PUT    /positions/{id}/strategy
 GET    /pnl                           ?from&to
 GET    /exposure                      GET /risk
-POST   /risk/scenario                 price shock (M7.5)
+POST   /risk/scenario                 price shock; models only, writes nothing (K56)
 GET    /transactions                  ledger, cursor-paginated on seq
 GET    /funding
 
@@ -353,7 +353,7 @@ Directories are created when the module is written, not in advance.
 | **M5** ✅ | Perpetuals + collateral | USD-M perps in the registry (`PERPETUAL` + `TRADING` only), fills and funding normalized, the margin picture captured as one act and stored, `GET /risk` reporting equity, margin buffer, maintenance margin and per-position liquidation distance from one snapshot named in `as_of`, `GET /funding` summing payments per symbol from the ledger; a stale capture is served with `collateral_stale` and a missing one is `collateral_unavailable`, never a zero buffer; hedge mode refused (one-way only) |
 | **M6** ✅ | Strategy + risk + alerting | Strategy tags that survive a projection rebuild (K30); a risk engine reporting gross AND directional leverage, so a delta-neutral basis trade does not read as 2× (K13); `GET /exposure` agreeing with `/portfolio` on one run; alert rules with hysteresis and cooldown — twenty crossings, one alert — delivered to Telegram or a webhook and recorded either way; SSE over LISTEN/NOTIFY (K51); the USD-M history walk M5 left uncalled, and the live futures stream as its trigger (F17, F19, F20); dashboard v1 |
 | **M7** ✅ | Reconciliation | Classified findings (`missing_event` / `duplicate` / `rounding` / `unsupported`) decided from evidence rather than sign (K54); a register where a problem has a lifetime rather than a timestamp, so a disagreement lasting a day is one finding and not 288 (K53); `GET /data-quality`; a resync that rewinds the walk and writes no correction (K55); and `reconciliation_mismatch` — declared in M0 and never produced until now — reaching `/portfolio` from an open finding |
-| **M7.5** | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock |
+| **M7.5** ✅ | Scenario shock | `POST /risk/scenario` projects equity and margin buffer under a price shock. A shock names its asset and the unshocked hold still, so a hedged book is shown on both legs and no correlation is invented (K56); maintenance is recomputed from the venue's tier table at the shocked notional rather than scaled, because a shock worth modelling usually crosses a tier (F15); an uncaptured bracket table makes the buffer unavailable rather than larger |
 | **M8** | Bybit + cross-venue transfers | Two sources normalized correctly into one portfolio; withdrawals match deposits |
 
 **M2 is code complete and not shipped.** Every piece is written and tested against

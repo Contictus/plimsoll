@@ -261,6 +261,7 @@ backend/
     freshness/     reason codes, severities, the response envelope        (K23, L11)
     strategy/      the sleeve tag, and the rebuild that must not erase it   (K13, K30)
     risk/          exposure, leverage, concentration, net delta -- pure   (K13, L4)
+    scenario/      the price shock: equity and buffer after a move -- pure (K56, M7.5)
     quality/       the findings register + the checks needing no venue call (K14, K53)
     reconciliation/  our fold vs the venue's answer, and the classifier   (K54, K55, M7)
     alert/         hysteresis, cooldown, delivery, the record              (M6, L13)

@@ -1,5 +1,6 @@
 "use client";
 
+import { Scenario } from "../components/Scenario";
 import type { Envelope } from "../lib/api";
 import { Amount } from "../components/Amount";
 import { Page } from "../components/Page";
@@ -45,8 +46,9 @@ type Risk = Envelope & { integrations: IntegrationRisk[] };
 export default function RiskPage() {
   return (
     <Page<Risk> title="Risk" path="/risk" topic="risk">
-      {(data) =>
-        data.integrations.length === 0 ? (
+      {(data) => (
+        <>
+          {data.integrations.length === 0 ? (
           <p className="empty">
             No margin picture has been captured. The banner above says why — an empty screen
             here is not an account with no risk.
@@ -134,8 +136,12 @@ export default function RiskPage() {
               )}
             </section>
           ))
-        )
-      }
+          )}
+          {/* After the positions, because a projection is only worth reading once the reader
+              knows what is being projected. */}
+          <Scenario />
+        </>
+      )}
     </Page>
   );
 }
