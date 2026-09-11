@@ -315,6 +315,15 @@ type Strategy struct {
 	CreatedAt time.Time
 }
 
+type TransferLink struct {
+	ID        uuid.UUID
+	AccountID uuid.UUID
+	OutSeq    int64
+	InSeq     int64
+	Method    string
+	LinkedAt  time.Time
+}
+
 type ValuationPrice struct {
 	RunID      int64
 	AssetID    int64

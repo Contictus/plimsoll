@@ -146,6 +146,15 @@ func run(log *slog.Logger) error {
 		runAlerts(ctx, pool, d.keys, log)
 	}()
 
+	// Transfer matching is account-wide rather than per integration, because the movement it
+	// joins has one half under each of two of them. A per-integration loop could only ever see
+	// one leg (M8, K57).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runTransferMatching(ctx, pool, log)
+	}()
+
 	for _, assignment := range assignments {
 		wg.Add(1)
 		go func() {

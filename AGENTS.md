@@ -266,6 +266,7 @@ backend/
     scenario/      the price shock: equity and buffer after a move -- pure (K56, M7.5)
     quality/       the findings register + the checks needing no venue call (K14, K53)
     reconciliation/  our fold vs the venue's answer, and the classifier   (K54, K55, M7)
+    transfer/      cross-venue matching: two halves, one movement      (K12, K57, M8)
     alert/         hysteresis, cooldown, delivery, the record              (M6, L13)
     httpapi/       routing, session cookie, handlers                      (K16, K27)
     obs/           slog with secret redaction + OTel                      (L13)
@@ -275,13 +276,14 @@ frontend/          Next.js dashboard: portfolio, risk, exposure, alerts     (K27
 deploy/            compose topology, Caddyfile, postgres init
 ```
 
-**Planned.** Not written, and deliberately so — a directory is created when its module is,
-never in advance. Listed because each one is a boundary already decided, so work that
-belongs in it should not be quietly absorbed by a neighbour.
+**Planned.** Empty as of M8: every boundary this file ever listed as coming has been written.
+A directory is created when its module is, never in advance — so when the next one is decided
+it is named here first, and work that belongs in it is not quietly absorbed by a neighbour.
 
-```
-    transfer/      cross-venue transfer matching                          (K12, M8)
-```
+The one thing still outstanding is not a directory. `exchange/bybit/` holds the venue's
+verified facts (`docs/BYBIT-API-NOTES.md`, B1–B4) and no client: M8 matched the two halves of
+a cross-venue movement, and a second full ingest is a later milestone. Half-building one is how
+a venue ends up with a normalizer nothing calls (K38, twice).
 
 ---
 
