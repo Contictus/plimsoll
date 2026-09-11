@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K56). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K57). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -227,10 +227,12 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K56 decision register
+  DECISIONS.md             K1–K57 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
+  BINANCE-API-NOTES.md     F1-F21, every venue fact verified against the docs
+  BYBIT-API-NOTES.md       B1-B4, the same for the second venue
   plans/                   per-milestone implementation plans
 backend/
   cmd/api/                 HTTP process — reads only, never writes the ledger

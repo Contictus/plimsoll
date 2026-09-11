@@ -995,6 +995,44 @@ understates the danger.
 
 ---
 
+### K57 - A cross-venue transfer is matched, and an unmatchable half is a finding · `extends K12`
+K49 found that the intra-venue case has nothing to match: Binance reports one row that names
+both wallets. The cross-venue case is the problem K12 actually described -- two ledger events
+under two integrations, joined by a heuristic.
+
+The heuristic is asset, amount within a fee tolerance, and a time window, with `txid` deciding
+outright when both halves carry one. The order matters: **a txid match is proof and is taken
+first**, because two chains agreeing on a transaction hash is not a coincidence, while an
+amount-and-window match is a strong guess. A guess that overrides proof is how the wrong two
+legs get joined and one real transfer is reported twice.
+
+A match is **one-to-one and both halves are consumed.** Without that, one deposit can be
+claimed by two withdrawals of the same size -- an account that moves the same round number
+twice a week produces exactly that, and the resulting link says the money went somewhere it
+did not.
+
+**Ambiguity is refused rather than broken by time.** When two candidates fit equally well,
+neither is linked and both go to the queue. Picking the nearer one would be right most of the
+time, and the times it is wrong are indistinguishable from the times it is right.
+
+**The asymmetry is the point of the queue.** Bybit publishes the enums that let its
+withdrawals be normalized; Binance does not (B2, F5). So an account moving coins from Binance
+to Bybit produces a deposit with no withdrawal to match -- not because the matcher failed, but
+because the outbound half was never ingestible. That leftover is recorded as a data-quality
+finding (M7) rather than left silent, and its detail says which venue could not be read. A
+matcher that quietly dropped it would make a documentation gap look like a balance.
+
+**A link changes no number.** `transfer_links` joins two events and the fold ignores it
+entirely: the deposit already added and the withdrawal already subtracted, on two different
+integrations, and both are correct. What the link changes is the *interpretation* -- a
+withdrawal read as a disposal invents a realized loss, and the link is what says it was not
+one. So the exit test asserts that balances are byte-identical before and after matching, and
+that the link exists. A milestone whose success is mostly the absence of change needs both
+halves of that assertion, or a matcher that did nothing at all would pass (K49 learned this
+the same way).
+
+---
+
 ## Deliberately Out of Scope
 
 | Not doing | Why |
