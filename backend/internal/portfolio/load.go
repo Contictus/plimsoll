@@ -8,6 +8,7 @@ import (
 
 	"github.com/Contictus/plimsoll/backend/internal/ingest"
 	"github.com/Contictus/plimsoll/backend/internal/position"
+	"github.com/Contictus/plimsoll/backend/internal/quality"
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/strategy"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
@@ -175,6 +176,15 @@ func read(ctx context.Context, q *store.Queries, accountID uuid.UUID, w Window) 
 	reasons := ReasonsFor(statuses, lagging, now, leaseTTL)
 	reasons = append(reasons, NegativeBalances(balances)...)
 	reasons = append(reasons, UnattributedFees(statuses, unattributed, now)...)
+
+	// The register, read in the same transaction as the fold it casts doubt on. A response
+	// that said "everything is current" while an open finding contradicted it would be the
+	// exact failure L11 exists to prevent.
+	open, err := quality.Open(ctx, q, accountID)
+	if err != nil {
+		return Input{}, err
+	}
+	reasons = append(reasons, OpenFindings(open, now)...)
 
 	return Input{
 		AsOf:      now,

@@ -37,6 +37,14 @@ const defaultFuturesResyncWindow = time.Hour
 // loop is alive" stays true, not an attempt to track every tick of the mark.
 const defaultCaptureEvery = 30 * time.Second
 
+// defaultReconcileEvery is how often our fold is checked against the venue's answer.
+//
+// Five minutes rather than thirty seconds because a disagreement is not a fast-moving number:
+// it appears when an event is missed and it stays until something is done about it. Asking
+// ten times more often would cost weight that history is a better use of, and would tell the
+// user nothing they did not already know four and a half minutes ago.
+const defaultReconcileEvery = 5 * time.Minute
+
 // ErrNotLeader means another worker holds the lease for this integration. It is a normal
 // outcome on a fleet, not a failure: most workers lose most claims.
 var ErrNotLeader = errors.New("worker: another worker holds this integration")
@@ -83,6 +91,13 @@ type Projector interface {
 // is asked for again and again, and the previous answer is not built on.
 type Capturer interface {
 	Capture(ctx context.Context) error
+}
+
+// Reconciler asks the venue whether our fold matches what it believes, and records the
+// answer. Separate from Capturer because it is not a picture being stored for a reader: it is
+// a comparison whose only output is findings, and it runs whether or not anyone is looking.
+type Reconciler interface {
+	Reconcile(ctx context.Context) error
 }
 
 // SymbolResyncer replays one symbol's fills over a bounded window. Separate from Resyncer,
@@ -162,6 +177,22 @@ type SupervisorConfig struct {
 	// told independently, by /risk ageing into collateral_stale.
 	OnCaptureError func(error)
 
+	// Reconcile compares our fold against the venue on a ticker of its own. Optional and nil
+	// by default, like Capture: an integration whose credentials cannot answer is better off
+	// reconciling nothing than reporting a failure every five minutes.
+	Reconcile Reconciler
+
+	// ReconcileEvery is how often that comparison runs. Slower than the capture by an order
+	// of magnitude on purpose: a disagreement that appears is a disagreement that will still
+	// be there in five minutes, and the venue's weight budget is better spent on history.
+	ReconcileEvery time.Duration
+
+	// OnReconcileError is called when a reconciliation run fails and the supervisor carries
+	// on. The reader is told independently: a failed run opens a snapshot_failed finding, so
+	// a reconciler that has quietly died is visible in the register whether or not this
+	// process is alive to say so (L11).
+	OnReconcileError func(error)
+
 	Now func() time.Time
 }
 
@@ -214,6 +245,9 @@ func NewSupervisor(cfg SupervisorConfig) (*Supervisor, error) {
 	}
 	if cfg.CaptureEvery <= 0 {
 		cfg.CaptureEvery = defaultCaptureEvery
+	}
+	if cfg.ReconcileEvery <= 0 {
+		cfg.ReconcileEvery = defaultReconcileEvery
 	}
 	if cfg.ProjectEvery <= 0 {
 		cfg.ProjectEvery = defaultProjectEvery
@@ -323,6 +357,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		if err := s.runCapture(runCtx); err != nil {
+			failure <- err
+			cancel()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.runReconcile(runCtx); err != nil {
 			failure <- err
 			cancel()
 		}
@@ -650,6 +693,43 @@ func (s *Supervisor) runCapture(ctx context.Context) error {
 				}
 				if s.cfg.OnCaptureError != nil {
 					s.cfg.OnCaptureError(err)
+				}
+			}
+		}
+	}
+}
+
+// runReconcile compares our fold against the venue on a ticker, beside the ingestion.
+//
+// A failed run does not stop the supervisor, for the same reason a failed capture does not:
+// live events are the one thing that cannot be recovered later, and the venue is asked again
+// in one interval. The reader is told anyway -- a failed run opens a snapshot_failed finding,
+// so a reconciler that has quietly died is visible in the register whether or not this
+// process is alive to report it (L11).
+func (s *Supervisor) runReconcile(ctx context.Context) error {
+	if s.cfg.Reconcile == nil {
+		return nil
+	}
+	ticker := time.NewTicker(s.cfg.ReconcileEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := s.cfg.Reconcile.Reconcile(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				// A lost lease is the exception, as everywhere else: it does not mean the
+				// venue failed, it means this worker is no longer entitled to speak for the
+				// integration.
+				if errors.Is(err, ErrLeaseLost) {
+					return err
+				}
+				if s.cfg.OnReconcileError != nil {
+					s.cfg.OnReconcileError(err)
 				}
 			}
 		}

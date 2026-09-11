@@ -42,4 +42,13 @@ echo "--- the dashboard answers through caddy ---"
 # tests' business.
 curl -fsS http://localhost:8080/login | grep -q "Sign in"
 
+echo "--- the data-quality register refuses without a session ---"
+# The register names an account's integrations and what is wrong with them. It is not a
+# public surface, and a 200 here would be the leak (L12).
+code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/data-quality)
+test "$code" = "401"
+
+echo "--- the register has a page ---"
+curl -fsS http://localhost:8080/quality | grep -q "Data quality"
+
 echo "SMOKE: OK"

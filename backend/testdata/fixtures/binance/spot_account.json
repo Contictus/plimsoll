@@ -1,0 +1,32 @@
+{
+  "_source": "documented",
+  "_why": "GET /api/v3/account. No real key exists yet (M2 is code complete, live verification pending), so the shape is transcribed from the official response example and the values are chosen to exercise three cases at once: a balance that is entirely free, one that is entirely locked behind a resting order, and one split across both. Replace with a recorded payload when a key exists (F21).",
+  "_endpoint": "GET /api/v3/account",
+  "_docs": "https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints",
+  "makerCommission": 15,
+  "takerCommission": 15,
+  "buyerCommission": 0,
+  "sellerCommission": 0,
+  "commissionRates": {
+    "maker": "0.00150000",
+    "taker": "0.00150000",
+    "buyer": "0.00000000",
+    "seller": "0.00000000"
+  },
+  "canTrade": true,
+  "canWithdraw": false,
+  "canDeposit": false,
+  "brokered": false,
+  "requireSelfTradePrevention": false,
+  "preventSor": false,
+  "updateTime": 1789999200000,
+  "accountType": "SPOT",
+  "balances": [
+    { "asset": "BTC",  "free": "1.50000000",    "locked": "0.00000000" },
+    { "asset": "ETH",  "free": "0.00000000",    "locked": "4.25000000" },
+    { "asset": "USDT", "free": "1000.12345678", "locked": "250.87654322" },
+    { "asset": "BNB",  "free": "0.00000000",    "locked": "0.00000000" }
+  ],
+  "permissions": ["SPOT"],
+  "uid": 0
+}

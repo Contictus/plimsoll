@@ -19,7 +19,7 @@ below serves that claim.
 
 | File | When |
 |---|---|
-| `docs/DECISIONS.md` | Always. The decision register (K1–K52). Why the system is shaped this way. |
+| `docs/DECISIONS.md` | Always. The decision register (K1–K55). Why the system is shaped this way. |
 | `docs/ARCHITECTURE.md` | Before touching any module. Boundaries, data flow, tenancy, worker model. |
 | `docs/PROJECT.md` | Scope, canonical model, API surface, milestones. |
 | `docs/COMPETITIVE-ANALYSIS.md` | Positioning, and the failure modes competitors hit that we must not. |
@@ -227,7 +227,7 @@ writing something that overlaps it.
 ```
 CLAUDE.md · AGENTS.md      identical; this file
 docs/
-  DECISIONS.md             K1–K52 decision register
+  DECISIONS.md             K1–K55 decision register
   ARCHITECTURE.md          module boundaries, data flow, tenancy, worker model
   PROJECT.md               scope, canonical model, API, milestones
   COMPETITIVE-ANALYSIS.md  positioning and competitor failure modes
@@ -261,6 +261,8 @@ backend/
     freshness/     reason codes, severities, the response envelope        (K23, L11)
     strategy/      the sleeve tag, and the rebuild that must not erase it   (K13, K30)
     risk/          exposure, leverage, concentration, net delta -- pure   (K13, L4)
+    quality/       the findings register + the checks needing no venue call (K14, K53)
+    reconciliation/  our fold vs the venue's answer, and the classifier   (K54, K55, M7)
     alert/         hysteresis, cooldown, delivery, the record              (M6, L13)
     httpapi/       routing, session cookie, handlers                      (K16, K27)
     obs/           slog with secret redaction + OTel                      (L13)
@@ -276,8 +278,6 @@ belongs in it should not be quietly absorbed by a neighbour.
 
 ```
     transfer/      cross-venue transfer matching                          (K12, M8)
-    reconciliation/  our state vs the exchange's                          (M7)
-    quality/       data-quality checks that need no exchange call         (K14, M7)
 ```
 
 ---

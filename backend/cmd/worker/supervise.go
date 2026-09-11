@@ -11,10 +11,13 @@ import (
 	"github.com/Contictus/plimsoll/backend/internal/crypto"
 	"github.com/Contictus/plimsoll/backend/internal/exchange/binance"
 	"github.com/Contictus/plimsoll/backend/internal/integration"
+	"github.com/Contictus/plimsoll/backend/internal/reconciliation"
+
 	"github.com/Contictus/plimsoll/backend/internal/store"
 	"github.com/Contictus/plimsoll/backend/internal/tenancy"
 	"github.com/Contictus/plimsoll/backend/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -206,6 +209,32 @@ func runOnce(ctx context.Context, d deps, assignment worker.Assignment) error {
 		}),
 		OnCaptureError: func(err error) {
 			d.log.Warn("margin capture failed; ingestion continues",
+				"integration_id", assignment.IntegrationID, "error", err)
+		},
+
+		// The comparison against the venue, on a slower ticker than everything else (M7). It
+		// writes no ledger row and corrects nothing: its only output is findings, and a
+		// resync is the user's decision to make from them (K55).
+		Reconcile: worker.ReconcileRunner(worker.ReconcileConfig{
+			Deps: reconciliation.Deps{
+				DB:            d.pool,
+				AccountID:     assignment.AccountID,
+				IntegrationID: assignment.IntegrationID,
+				Source:        client,
+				Tolerance: reconciliation.Tolerance{
+					// One step of the widest precision the registry holds. A threshold chosen
+					// per asset belongs in configuration a human tunes; until that exists, the
+					// narrowest possible default reports a real discrepancy rather than
+					// filing it as dust (K54).
+					DefaultDust: decimal.New(1, -18),
+				},
+				SkewTolerance: 5 * time.Second,
+			},
+			OwnerID: d.ownerID,
+			Now:     time.Now,
+		}),
+		OnReconcileError: func(err error) {
+			d.log.Warn("reconciliation failed; ingestion continues",
 				"integration_id", assignment.IntegrationID, "error", err)
 		},
 		OnProjectError: func(err error) {

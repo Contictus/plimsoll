@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+const getAssetSymbol = `-- name: GetAssetSymbol :one
+SELECT canonical_symbol FROM assets WHERE id = $1
+`
+
+// The canonical name of an asset id. Reconciliation compares by canonical symbol, and this is
+// how it gets there from the id an alias resolved to (L8).
+func (q *Queries) GetAssetSymbol(ctx context.Context, assetID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getAssetSymbol, assetID)
+	var canonical_symbol string
+	err := row.Scan(&canonical_symbol)
+	return canonical_symbol, err
+}
+
 const resolveAssetAlias = `-- name: ResolveAssetAlias :one
 SELECT asset_id
 FROM asset_aliases

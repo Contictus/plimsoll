@@ -7,3 +7,8 @@ FROM asset_aliases
 WHERE source = sqlc.arg(source)
   AND external_symbol = sqlc.arg(external_symbol)
   AND validity @> sqlc.arg(at)::timestamptz;
+
+-- name: GetAssetSymbol :one
+-- The canonical name of an asset id. Reconciliation compares by canonical symbol, and this is
+-- how it gets there from the id an alias resolved to (L8).
+SELECT canonical_symbol FROM assets WHERE id = sqlc.arg(asset_id);

@@ -102,6 +102,35 @@ func (q *Queries) OpenBackfillScope(ctx context.Context, arg OpenBackfillScopePa
 	return err
 }
 
+const reopenBackfillScopes = `-- name: ReopenBackfillScopes :execrows
+UPDATE backfill_progress
+   SET cursor = '', completed_at = NULL, updated_at = now()
+ WHERE account_id = $1
+   AND integration_id = $2
+`
+
+type ReopenBackfillScopesParams struct {
+	AccountID     uuid.UUID
+	IntegrationID uuid.UUID
+}
+
+// Rewinds every scope of one integration so the history walk runs again (K55).
+//
+// This is the whole of "resync". It writes no correction and touches no ledger row (L2):
+// anything genuinely missing is appended by the ordinary ingest path under the ordinary dedup
+// key, and anything already present is deduplicated away (L5) -- which is what makes rewinding
+// to the beginning safe rather than reckless.
+//
+// The cursor goes to ” and not to NULL: the column is NOT NULL precisely so that "nothing
+// walked yet" has one spelling rather than two (migration 00013).
+func (q *Queries) ReopenBackfillScopes(ctx context.Context, arg ReopenBackfillScopesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reopenBackfillScopes, arg.AccountID, arg.IntegrationID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertBackfillProgress = `-- name: UpsertBackfillProgress :exec
 INSERT INTO backfill_progress (
   account_id, integration_id, scope, cursor, completed_at
